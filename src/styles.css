@@ -4541,6 +4541,93 @@ body,
   max-height: 160px;
 }
 
+/* ── 0.2.7 移动端群聊底部聊天栏重做 ── */
+/* 根因：① 提及卡片（.target-category-group + .target-category-items）默认
+   flex-wrap:wrap，@ 成员换行叠成 2~3 行，卡片 ~80px+；头部 + composer
+   超出 stage 一半高度后，overflow:hidden 的 stage 把最底下的输入行 +
+   发送按钮裁掉，手机上看不到发送按钮。② 提及行是 nowrap 横向滚动行，
+   但 .group-target-chip 没有 flex-shrink:0 也没有 white-space:nowrap，
+   「全体成员」被挤到只剩一个字宽、竖着切断。
+   修法（只动移动端群聊底部）：提及行改成单行横向滚动、什么都不许缩、
+   不许换行；卡片限高单行、内部横向滚动；composer 收紧，输入行 +
+   发送按钮固定在群聊页最底、永远可见。 */
+.mobile-group-stage .group-target-chips.grouped {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  max-height: 32px;
+  align-items: center;
+}
+
+.mobile-group-stage .group-target-chips.grouped > .group-target-chip,
+.mobile-group-stage .group-target-chips.grouped .target-category-group {
+  flex-shrink: 0;
+}
+
+.mobile-group-stage .group-target-chip {
+  white-space: nowrap;
+}
+
+/* 成员卡片：单行，限高，内容多时卡片内部横向滚动，不再撑高聊天栏 */
+.mobile-group-stage .target-category-group {
+  flex-wrap: nowrap;
+  max-height: 30px;
+  overflow: hidden;
+}
+
+.mobile-group-stage .target-category-items {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.mobile-group-stage .target-category-items::-webkit-scrollbar {
+  display: none;
+}
+
+/* 模式行：单行横向滚动，按钮不许缩 */
+.mobile-group-stage .group-workflow-bar {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.mobile-group-stage .workflow-mode-group,
+.mobile-group-stage .workflow-hops-group {
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+
+.mobile-group-stage .workflow-mode-btn,
+.mobile-group-stage .workflow-hop-btn,
+.mobile-group-stage .workflow-label {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* 提示行：单行省略，不占两行 */
+.mobile-group-stage .group-composer-hint {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 输入行 + 发送按钮：同一行固定在底部，发送按钮永远可见 */
+.mobile-group-stage .group-input-row {
+  gap: 8px;
+}
+
+.mobile-group-stage .group-chat-input {
+  min-width: 0;
+  min-height: 40px;
+}
+
+.mobile-group-stage .group-send-btn {
+  height: 40px;
+  padding: 0 14px;
+  flex-shrink: 0;
+}
+
 /* 群聊设置弹窗：共享上下文大输入框在移动端不许占半屏 */
 .mobile-shell .group-knowledge-modal-card #modal-group-context-input {
   max-height: 160px;
