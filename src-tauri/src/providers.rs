@@ -153,7 +153,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
         short_name: "Cue".to_string(),
         enabled: true,
         status_text: "已启用".to_string(),
-        entry_url: "https://cue.im/".to_string(),
+        entry_url: "https://cue.im/login".to_string(),
         homepage_url: "https://cue.im/".to_string(),
         callback_origins: vec!["https://cue.im".to_string()],
         verified_methods: vec![
