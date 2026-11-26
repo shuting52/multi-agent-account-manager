@@ -138,6 +138,7 @@ type ProviderLogoSpec = { src: string; fullBleed: boolean; monoDark?: boolean };
 const PROVIDER_LOGOS: Record<string, ProviderLogoSpec> = {
   muse: { src: "/logos/muse.png", fullBleed: true },
   hark: { src: "/logos/hark.svg", fullBleed: false, monoDark: true },
+  cue: { src: "/logos/cue.svg", fullBleed: false },
 };
 
 const GROUP_SKILL_PRESETS: Array<Omit<GroupSharedSkill, "id" | "enabled">> = [
@@ -1883,7 +1884,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
         )
         .join("");
       tabBody = `
-        <div class="modal-desc">声明式网站适配器（内置 Muse / Hark 规则，可按需热覆盖选择器）与 Fetch/SSE 只读挂钩协同工作。</div>
+        <div class="modal-desc">声明式网站适配器（内置 Muse / Hark / Cue 规则，可按需热覆盖选择器）与 Fetch/SSE 只读挂钩协同工作。</div>
         <div class="adapter-chip-row">${chipsHtml || `<span class="modal-hint">正在读取规则…</span>`}</div>
         <div class="modal-hint">覆盖规则文件（保存即热生效，无需重编译）：<code>${escapeHtml(snap?.overridePath ?? "site_adapters.json")}</code></div>
         <textarea
@@ -2739,7 +2740,7 @@ function renderGroupRightStage(state: ManagerSnapshot): string {
         <div class="stage-card">
           <div class="stage-logo-tile group-stage-icon">${ICON_GROUP}</div>
           <div class="placeholder-title">创建你的跨服务 AI 群聊</div>
-          <div class="placeholder-desc">支持 Muse / Hark 网页账号与 OpenAI API / 本地 CLI 混编入群，内置并行、评审流、A2A 接力与独立会话绑定。</div>
+          <div class="placeholder-desc">支持 Muse / Hark / Cue 网页账号与 OpenAI API / 本地 CLI 混编入群，内置并行、评审流、A2A 接力与独立会话绑定。</div>
           <div class="stage-card-actions">
             <button id="stage-create-group-btn" class="btn primary" type="button">+ 创建群聊</button>
           </div>

@@ -602,6 +602,11 @@ body,
   color: #4338ca;
 }
 
+.avatar.cue {
+  background: #e8f2fe;
+  color: #2563eb;
+}
+
 .avatar.pending-identity {
   background: #f1f5f9;
   color: #64748b;
@@ -2145,6 +2150,11 @@ body,
 :root[data-theme="dark"] .avatar.hark {
   background: rgba(99, 102, 241, 0.22);
   color: #a5b4fc;
+}
+
+:root[data-theme="dark"] .avatar.cue {
+  background: rgba(66, 157, 250, 0.22);
+  color: #7db8fb;
 }
 
 :root[data-theme="dark"] .avatar.custom {

@@ -6951,6 +6951,10 @@ impl SessionManager {
                     if let Ok(u) = Url::parse("https://app.hark.com/login") {
                       let _ = wv.navigate(u);
                     }
+                  } else if key.provider_id.is_cue() {
+                    if let Ok(u) = Url::parse("https://cue.im/login") {
+                      let _ = wv.navigate(u);
+                    }
                   }
                 }
               } else if !probe.page_error.is_empty() {
@@ -9356,6 +9360,10 @@ impl SessionManager {
                 }
               } else if key.provider_id.is_hark() {
                 if let Ok(u) = Url::parse("https://app.hark.com/login") {
+                  let _ = main_wv.navigate(u);
+                }
+              } else if key.provider_id.is_cue() {
+                if let Ok(u) = Url::parse("https://cue.im/login") {
                   let _ = main_wv.navigate(u);
                 }
               }

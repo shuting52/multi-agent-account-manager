@@ -14,6 +14,10 @@ impl ProviderId {
     Self("hark".to_string())
   }
 
+  pub fn cue() -> Self {
+    Self("cue".to_string())
+  }
+
   pub fn api() -> Self {
     Self("api".to_string())
   }
@@ -34,6 +38,10 @@ impl ProviderId {
     self.0 == "hark"
   }
 
+  pub fn is_cue(&self) -> bool {
+    self.0 == "cue"
+  }
+
   pub fn is_api(&self) -> bool {
     self.0 == "api"
   }
@@ -48,12 +56,12 @@ impl ProviderId {
   }
 
   pub fn is_builtin(&self) -> bool {
-    self.is_muse() || self.is_hark()
+    self.is_muse() || self.is_hark() || self.is_cue()
   }
 
   pub fn parse(value: &str) -> Option<Self> {
     let clean = value.trim().to_ascii_lowercase();
-    if clean == "muse" || clean == "hark" || clean == "api" || clean == "cli" {
+    if clean == "muse" || clean == "hark" || clean == "cue" || clean == "api" || clean == "cli" {
       Some(Self(clean))
     } else {
       None
@@ -134,6 +142,31 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
       allowed_hosts: vec![
         "app.hark.com".to_string(),
         "hark.com".to_string(),
+        "appleid.apple.com".to_string(),
+        "idmsa.apple.com".to_string(),
+      ],
+    },
+    ProviderSpec {
+      info: ProviderInfo {
+        id: ProviderId::cue(),
+        name: "Cue".to_string(),
+        short_name: "Cue".to_string(),
+        enabled: true,
+        status_text: "已启用".to_string(),
+        entry_url: "https://cue.im/".to_string(),
+        homepage_url: "https://cue.im/".to_string(),
+        callback_origins: vec!["https://cue.im".to_string()],
+        verified_methods: vec![
+          "email".to_string(),
+          "phone".to_string(),
+          "apple".to_string(),
+          "google".to_string(),
+        ],
+      },
+      allowed_hosts: vec![
+        "cue.im".to_string(),
+        "manus.im".to_string(),
+        "manuscdn.com".to_string(),
         "appleid.apple.com".to_string(),
         "idmsa.apple.com".to_string(),
       ],

@@ -144,6 +144,50 @@ pub fn builtin_site_adapters() -> Vec<SiteAdapterConfig> {
       async_agent: true,
     },
     SiteAdapterConfig {
+      id: "cue".to_string(),
+      name: "Cue".to_string(),
+      host_patterns: svec(&["cue.im", "*.cue.im"]),
+      composer_selectors: svec(&[
+        "textarea[placeholder*=\"消息\"]",
+        "textarea",
+        "[contenteditable=\"true\"]",
+      ]),
+      send_button_selectors: svec(&[
+        "button[type=\"submit\"]",
+        "button[aria-label*=\"发送\"]",
+        "button[aria-label*=\"Send\" i]",
+      ]),
+      stop_button_selectors: svec(&[
+        "button[aria-label*=\"停止\"]",
+        "button[aria-label*=\"Stop\" i]",
+        "button[data-testid*=\"stop\" i]",
+      ]),
+      message_list_selectors: svec(&["[data-testid=\"message-list\"]"]),
+      assistant_message_selectors: svec(&[
+        "[data-message-author-role=\"assistant\"]",
+        "[data-testid*=\"assistant\" i]",
+      ]),
+      new_chat_selectors: Vec::new(),
+      new_chat_url: Some("https://cue.im/".to_string()),
+      thread_url_patterns: Vec::new(),
+      transient_status_words: svec(&[
+        "正在思考",
+        "思考中",
+        "正在处理",
+        "处理中",
+        "正在生成",
+        "生成中",
+        "正在搜索",
+        "搜索中",
+        "Thinking",
+        "Working",
+        "Generating",
+      ]),
+      chat_api_patterns: svec(&["/api/", "/chat", "/conversation"]),
+      prefer_enter_submit: false,
+      async_agent: true,
+    },
+    SiteAdapterConfig {
       id: "generic".to_string(),
       name: "通用适配兜底".to_string(),
       host_patterns: svec(&["*"]),
@@ -638,6 +682,7 @@ mod tests {
     assert_eq!(resolve_adapter_for_host(&dir, "muse.ai").id, "muse");
     assert_eq!(resolve_adapter_for_host(&dir, "sub.muse.ai").id, "muse");
     assert_eq!(resolve_adapter_for_host(&dir, "app.hark.com").id, "hark");
+    assert_eq!(resolve_adapter_for_host(&dir, "cue.im").id, "cue");
     assert_eq!(resolve_adapter_for_host(&dir, "unknown.example.org").id, "generic");
     let _ = fs::remove_dir_all(&dir);
   }
