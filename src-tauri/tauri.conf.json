@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "叠号",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "identifier": "com.ldjx.accountmanager",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -18,7 +18,10 @@
   "bundle": {
     "active": true,
     "shortDescription": "AI 助手账号切换器",
-    "targets": ["dmg", "nsis"],
+    "targets": [
+      "dmg",
+      "nsis"
+    ],
     "macOS": {
       "minimumSystemVersion": "14.0"
     },

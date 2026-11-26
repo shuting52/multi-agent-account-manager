@@ -1340,7 +1340,7 @@ function renderUpdateModal(): string {
             ? `<span>→</span><span class="update-version-pill latest">最新 v${escapeHtml(res.latestVersion)}</span>`
             : ""
         }
-        ${res.size ? `<span class="update-size-label">${escapeHtml(formatBytes(res.size))}</span>` : ""}
+        ${hasUpdate && res.size ? `<span class="update-size-label">${escapeHtml(formatBytes(res.size))}</span>` : ""}
       </div>
     `
     : `<div class="modal-desc">正在连接 GitHub Releases 检查版本信息...</div>`;
@@ -1369,7 +1369,7 @@ function renderUpdateModal(): string {
         bodyHtml += `<div class="modal-desc">当前发布尚未包含本平台自动安装包，请点击「发布页」手动下载。</div>`;
       }
     } else {
-      bodyHtml += `<div class="modal-desc">${escapeHtml(noteText || "当前已是最新版本。")}</div>`;
+      bodyHtml += `<div class="modal-desc">当前已是最新版本 v${escapeHtml(curVer)}。</div>`;
     }
   }
 
