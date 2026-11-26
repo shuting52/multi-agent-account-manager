@@ -1508,14 +1508,14 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
                 ? `
               <div class="sync-privacy-note">不收集任何用户数据：每次同步均在本地随机生成一次性 256-bit 密钥进行 AES-256-GCM 端到端加密，密钥仅包含在二维码/同步串中，绝不上传服务端；服务端仅临时暂存纯密文，无法解密，3 分钟或拉取完成后立即销毁。</div>
               <div class="sync-inline-row">
-                <sakuga-input id="sync-relay-url" label="中转地址" placeholder="留空用官方中转；自建填 Cloudflare Worker 地址（https://...）" value="${escapeHtml(modal.relayUrlDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
+                <sakuga-input id="sync-relay-url" maxlength="260" label="中转地址" placeholder="留空用官方中转；自建填 Cloudflare Worker 地址（https://...）" value="${escapeHtml(modal.relayUrlDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
                 <sakuga-button id="sync-lan-start-btn" type="button" ${busyAny ? "disabled" : ""}>${modal.lanShareBusy ? "上传密文中..." : isRelayActive ? "重新生成" : "生成随机加密中转码"}</sakuga-button>
               </div>
             `
                 : `
               <div class="modal-hint">默认仅通过本地局域网点对点直连（3 分钟或最多 3 次拉取后自动关闭）。口令是接收端拉取时要输入的，留空自动生成 6 位数字 PIN，生成后显示在下方二维码旁边。</div>
               <div class="sync-inline-row">
-                <sakuga-input id="sync-lan-share-pass" label="同步口令" placeholder="同步口令（留空自动生成 6 位数字 PIN）" value="${escapeHtml(modal.lanSharePassDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
+                <sakuga-input id="sync-lan-share-pass" maxlength="64" label="同步口令" placeholder="同步口令（留空自动生成 6 位数字 PIN）" value="${escapeHtml(modal.lanSharePassDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
                 <sakuga-button id="sync-lan-start-btn" type="button" ${busyAny ? "disabled" : ""}>${modal.lanShareBusy ? "开启中..." : shareInfo && !isRelayActive ? "重新开启" : "开启共享"}</sakuga-button>
               </div>
             `
@@ -1553,9 +1553,9 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
                 ? `<sakuga-button id="sync-lan-scan-btn" class="sync-scan-btn" type="button" ${busyAny ? "disabled" : ""}>${ICON_QR_SCAN}<span>${modal.lanScanBusy ? "正在识别并同步..." : "扫码直接同步"}</span></sakuga-button>`
                 : ""
             }
-            <sakuga-input id="sync-lan-pull-addr" label="同步串或局域网地址" placeholder="输入局域网地址或粘贴 maam-sync:// 同步串（支持局域网与中转码）" value="${escapeHtml(modal.lanPullAddrDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
+            <sakuga-input id="sync-lan-pull-addr" maxlength="512" label="同步串或局域网地址" placeholder="输入局域网地址或粘贴 maam-sync:// 同步串（支持局域网与中转码）" value="${escapeHtml(modal.lanPullAddrDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
             <div class="sync-inline-row">
-              <sakuga-input id="sync-lan-pull-pass" label="拉取口令" placeholder="口令：扫码后自动填；手动粘贴同步串时填发送端显示的口令" value="${escapeHtml(modal.lanPullPassDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
+              <sakuga-input id="sync-lan-pull-pass" maxlength="128" label="拉取口令" placeholder="口令：扫码后自动填；手动粘贴同步串时填发送端显示的口令" value="${escapeHtml(modal.lanPullPassDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
               <sakuga-button id="sync-lan-pull-btn" type="button" ${busyAny ? "disabled" : ""}>${modal.lanPullBusy ? "拉取中..." : "拉取并合并"}</sakuga-button>
             </div>
           </div>
@@ -1566,7 +1566,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
             <div class="modal-hint">用途：换手机或重装后恢复全部账号。AES-256-GCM 端到端加密，包含所有账号、代理、时区、群聊与 Cookie 登录态。</div>
             <div class="modal-hint">口令自己定（至少 4 位），导入时还要输这个口令，丢了口令这个文件就打不开，一定要记好。</div>
             <div class="sync-inline-row">
-              <sakuga-input id="sync-file-export-pass" label="加密口令" type="password" placeholder="设置加密口令（至少 4 位，导入时要用，一定要记好）" value="${escapeHtml(modal.fileExportPassDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
+              <sakuga-input id="sync-file-export-pass" maxlength="128" label="加密口令" type="password" placeholder="设置加密口令（至少 4 位，导入时要用，一定要记好）" value="${escapeHtml(modal.fileExportPassDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
               <sakuga-button id="sync-file-export-btn" type="button" ${busyAny ? "disabled" : ""}>${modal.fileExportBusy ? "导出中..." : "导出备份"}</sakuga-button>
             </div>
             ${
@@ -1589,7 +1589,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
             ${modal.fileImportFileName ? `<div class="modal-hint">已读取文件：${escapeHtml(modal.fileImportFileName)}</div>` : ""}
             <textarea id="sync-file-import-json" class="modal-textarea compact-cookie-textarea" rows="3" placeholder="或直接在此粘贴 .maam 加密备份全文" spellcheck="false" ${busyAny ? "disabled" : ""}>${escapeHtml(modal.fileImportJsonDraft)}</textarea>
             <div class="sync-inline-row">
-              <sakuga-input id="sync-file-import-pass" label="解密口令" type="password" placeholder="输入备份时的解密口令" value="${escapeHtml(modal.fileImportPassDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
+              <sakuga-input id="sync-file-import-pass" maxlength="128" label="解密口令" type="password" placeholder="输入备份时的解密口令" value="${escapeHtml(modal.fileImportPassDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
               <sakuga-button id="sync-file-import-btn" type="button" ${busyAny ? "disabled" : ""}>${modal.fileImportBusy ? "导入中..." : "解密并导入"}</sakuga-button>
             </div>
           </div>
@@ -1674,7 +1674,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
               <label class="modal-desc" for="modal-shortcut-input">全局呼出 / 隐藏快捷键</label>
               <span class="shortcut-status-pill ${state.globalShortcutActive ? "ok" : state.globalShortcutError ? "err" : ""}" title="${escapeHtml(statusText)}">${escapeHtml(state.globalShortcutActive ? "已生效" : state.globalShortcutError ? "注册失败" : "未启用")}</span>
             </div>
-            <sakuga-input id="modal-shortcut-input" label="全局快捷键" placeholder="CommandOrControl+Shift+M（留空禁用）" value="${escapeHtml(modal.globalShortcut)}" autocomplete="off" ${saving ? "disabled" : ""}></sakuga-input>
+            <sakuga-input id="modal-shortcut-input" maxlength="80" label="全局快捷键" placeholder="CommandOrControl+Shift+M（留空禁用）" value="${escapeHtml(modal.globalShortcut)}" autocomplete="off" ${saving ? "disabled" : ""}></sakuga-input>
             <div class="preset-chips">
               ${shortcutPresets
                 .map(
@@ -1717,18 +1717,18 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
       <div class="${modalOverlayClass()}" role="dialog" aria-modal="true">
         <div class="modal-card">
           <div class="modal-title">${title}</div>
-          <sakuga-input id="modal-alias-input" label="备注名称" placeholder="${aliasPlaceholder}" value="${escapeHtml(modal.draft)}" ${saving ? "disabled" : ""}></sakuga-input>
+          <sakuga-input id="modal-alias-input" maxlength="60" label="备注名称" placeholder="${aliasPlaceholder}" value="${escapeHtml(modal.draft)}" ${saving ? "disabled" : ""}></sakuga-input>
           ${supportsProxy ? `
             <label class="modal-desc" for="modal-proxy-input">HTTP CONNECT 代理（留空使用系统网络）</label>
             <div class="proxy-input-row">
-              <sakuga-input id="modal-proxy-input" label="代理地址" placeholder="http://127.0.0.1:7890" value="${escapeHtml(modal.proxyDraft)}" autocomplete="off" ${saving ? "disabled" : ""}></sakuga-input>
+              <sakuga-input id="modal-proxy-input" maxlength="512" label="代理地址" placeholder="http://127.0.0.1:7890" value="${escapeHtml(modal.proxyDraft)}" autocomplete="off" ${saving ? "disabled" : ""}></sakuga-input>
               ${!isMobilePlatform(platform) ? `<button id="proxy-test-btn" class="btn mini-test-btn" type="button" ${saving || proxyTesting ? "disabled" : ""}>${proxyTesting ? "测速中..." : "测试连接"}</button>` : ""}
             </div>
             ${testRes ? `<div id="proxy-test-result" class="proxy-test-box ${testRes.ok ? "ok" : "err"}">${escapeHtml(testRes.message)}</div>` : ""}
             <div class="modal-hint">仅作用于内嵌页面；外部浏览器登录与更新检查不走此代理。</div>
           ` : ""}
           <label class="modal-desc" for="modal-timezone-input">自定义时区（留空跟随系统）</label>
-          <sakuga-input id="modal-timezone-input" label="自定义时区" placeholder="IANA 时区（例如 America/New_York、Asia/Tokyo）" value="${escapeHtml(modal.timezoneDraft)}" autocomplete="off" ${saving ? "disabled" : ""}></sakuga-input>
+          <sakuga-input id="modal-timezone-input" maxlength="64" label="自定义时区" placeholder="IANA 时区（例如 America/New_York、Asia/Tokyo）" value="${escapeHtml(modal.timezoneDraft)}" autocomplete="off" ${saving ? "disabled" : ""}></sakuga-input>
           <div class="preset-chips">
             ${TIMEZONE_PRESETS.map(
               (p) =>
@@ -1876,7 +1876,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
       <div class="${modalOverlayClass()}" role="dialog" aria-modal="true">
         <div class="modal-card group-modal-card">
           <div class="modal-title">${editing ? `编辑「${escapeHtml(gModal.group!.name)}」` : "创建群聊"}</div>
-          <sakuga-input id="modal-group-name-input" label="群聊名称" placeholder="群聊名称（如：产品头脑风暴）" value="${escapeHtml(gModal.nameDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
+          <sakuga-input id="modal-group-name-input" maxlength="32" label="群聊名称" placeholder="群聊名称（如：产品头脑风暴）" value="${escapeHtml(gModal.nameDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
           <div class="group-picker-head-row">
             <div class="modal-desc">选择参与群聊的网页账号或 API / CLI 成员</div>
             <button id="open-external-agents-from-group-btn" class="mini-btn primary-text" type="button" ${saving ? "disabled" : ""}>+ 管理 API/CLI</button>
@@ -1948,8 +1948,8 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
         <div class="skills-list">${skillsHtml}</div>
         <div class="skill-editor-box">
           <div class="skill-editor-title">${kModal.editingSkillId ? "编辑共享技能" : "添加自定义技能"}</div>
-          <sakuga-input id="modal-skill-name-input" label="技能名称" placeholder="技能名称（如：代码审查规范）" value="${escapeHtml(kModal.skillNameDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
-          <sakuga-input id="modal-skill-desc-input" label="技能说明" placeholder="简短说明（选填）" value="${escapeHtml(kModal.skillDescDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
+          <sakuga-input id="modal-skill-name-input" maxlength="48" label="技能名称" placeholder="技能名称（如：代码审查规范）" value="${escapeHtml(kModal.skillNameDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
+          <sakuga-input id="modal-skill-desc-input" maxlength="120" label="技能说明" placeholder="简短说明（选填）" value="${escapeHtml(kModal.skillDescDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
           <textarea id="modal-skill-content-input" class="modal-textarea" rows="3" maxlength="2000" placeholder="输入注入给各 AI 成员的技能指令原文…" ${saving ? "disabled" : ""}>${escapeHtml(kModal.skillContentDraft)}</textarea>
           <div class="skill-editor-actions">
             ${kModal.editingSkillId ? `<button id="modal-skill-cancel-edit-btn" class="mini-btn" type="button" ${saving ? "disabled" : ""}>取消编辑</button>` : ""}
@@ -1994,7 +1994,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
                 <span class="group-provider-tag">${escapeHtml(meta.providerShort)}</span>
               </div>
               <sakuga-input
-                class="role-input"
+                class="role-input" maxlength="120"
                 label="成员分工"
                 data-role-provider="${escapeHtml(m.providerId)}"
                 data-role-uuid="${escapeHtml(m.uuid)}"
@@ -2100,14 +2100,14 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
     const fieldsHtml =
       eModal.formKind === "openai_api"
         ? `
-          <sakuga-input id="ext-agent-url-input" label="Base URL" placeholder="Base URL（例如 https://api.deepseek.com/v1 或 http://127.0.0.1:11434/v1）" value="${escapeHtml(eModal.baseUrlDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
-          <sakuga-input id="ext-agent-key-input" label="API Key" type="password" placeholder="API Key（本机 Ollama 可留空）" value="${escapeHtml(eModal.apiKeyDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
-          <sakuga-input id="ext-agent-model-input" label="模型名称" placeholder="模型名称（例如 gpt-4o / deepseek-chat / qwen2.5:14b）" value="${escapeHtml(eModal.modelDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
+          <sakuga-input id="ext-agent-url-input" maxlength="260" label="Base URL" placeholder="Base URL（例如 https://api.deepseek.com/v1 或 http://127.0.0.1:11434/v1）" value="${escapeHtml(eModal.baseUrlDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
+          <sakuga-input id="ext-agent-key-input" maxlength="512" label="API Key" type="password" placeholder="API Key（本机 Ollama 可留空）" value="${escapeHtml(eModal.apiKeyDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
+          <sakuga-input id="ext-agent-model-input" maxlength="120" label="模型名称" placeholder="模型名称（例如 gpt-4o / deepseek-chat / qwen2.5:14b）" value="${escapeHtml(eModal.modelDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
         `
         : `
-          <sakuga-input id="ext-agent-cmd-input" label="CLI 命令" placeholder="CLI 命令（例如 claude / codex / gemini）" value="${escapeHtml(eModal.commandDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
-          <sakuga-input id="ext-agent-args-input" label="命令参数" placeholder="命令参数，空格分隔（例如 -p 或 exec {prompt}；无 {prompt} 时走 stdin）" value="${escapeHtml(eModal.argsDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
-          <sakuga-input id="ext-agent-workdir-input" label="工作目录" placeholder="工作目录（选填，例如 /Users/name/project）" value="${escapeHtml(eModal.workdirDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
+          <sakuga-input id="ext-agent-cmd-input" maxlength="260" label="CLI 命令" placeholder="CLI 命令（例如 claude / codex / gemini）" value="${escapeHtml(eModal.commandDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
+          <sakuga-input id="ext-agent-args-input" maxlength="400" label="命令参数" placeholder="命令参数，空格分隔（例如 -p 或 exec {prompt}；无 {prompt} 时走 stdin）" value="${escapeHtml(eModal.argsDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
+          <sakuga-input id="ext-agent-workdir-input" maxlength="260" label="工作目录" placeholder="工作目录（选填，例如 /Users/name/project）" value="${escapeHtml(eModal.workdirDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
         `;
 
     return `
@@ -2128,7 +2128,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
                 <button class="mini-btn ${eModal.formKind === "local_cli" ? "primary-text" : ""}" data-ext-kind="local_cli" type="button" ${saving ? "disabled" : ""}>本地 CLI</button>
               </div>
             </div>
-            <sakuga-input id="ext-agent-name-input" label="显示名称" placeholder="群聊显示名称（如：Claude-Code / DeepSeek）" value="${escapeHtml(eModal.nameDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
+            <sakuga-input id="ext-agent-name-input" maxlength="40" label="显示名称" placeholder="群聊显示名称（如：Claude-Code / DeepSeek）" value="${escapeHtml(eModal.nameDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
             ${fieldsHtml}
             <div class="skill-editor-actions">
               ${eModal.editingId ? `<button id="ext-agent-cancel-edit-btn" class="mini-btn" type="button" ${saving ? "disabled" : ""}>取消编辑</button>` : ""}

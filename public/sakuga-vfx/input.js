@@ -11,7 +11,7 @@ const TYPES = ['text', 'email', 'search', 'url', 'tel', 'password'];
 class SakugaInput extends fx.Base {
   static delegates = true;
   static formAssociated = true;
-  static observedAttributes = ['value', 'placeholder', 'disabled', 'label'];
+  static observedAttributes = ['value', 'placeholder', 'disabled', 'label', 'maxlength'];
   static css = `
     input { width: var(--sk-input-width, 230px); max-width: 100%; padding: 13px 16px; border: var(--sk-bw) solid var(--sk-ink); border-radius: var(--sk-r); background: var(--sk-card); box-shadow: var(--sk-sh); font-weight: 600; font-size: 16px; outline: none; caret-color: var(--sk-ink); will-change: transform; }
     input::placeholder { color: var(--sk-dim); } input:disabled { opacity: .5; }`;
@@ -22,11 +22,12 @@ class SakugaInput extends fx.Base {
   attributeChangedCallback(name, _, v) {
     if (!this.inp) return;
     if (name === 'value') this.value = v ?? ''; else if (name === 'disabled') this.inp.disabled = this.disabled;
+    else if (name === 'maxlength') { if (v == null) this.inp.removeAttribute('maxlength'); else this.inp.setAttribute('maxlength', v); }
     else if (name === 'label') this.inp.setAttribute('aria-label', v || 'Text'); else this.inp.placeholder = v ?? '';
   }
   render() {
     const a = (n, d = '') => esc(this.getAttribute(n) ?? d), type = TYPES.includes(this.getAttribute('type')) ? this.getAttribute('type') : 'text';
-    return `<input part="input" type="${type}" value="${a('value')}" placeholder="${a('placeholder')}" aria-label="${a('label', 'Text')}" autocomplete="${a('autocomplete', 'off')}"${this.disabled ? ' disabled' : ''}>`;
+    return `<input part="input" type="${type}" value="${a('value')}" placeholder="${a('placeholder')}" aria-label="${a('label', 'Text')}" autocomplete="${a('autocomplete', 'off')}"${this.hasAttribute('maxlength') ? ` maxlength="${a('maxlength')}"` : ''}${this.disabled ? ' disabled' : ''}>`;
   }
   setup() {
     const inp = this.inp = this.$('input'), m = document.createElement('canvas').getContext('2d'); this.s = new Spring(1, 700, 16); this.internals.setFormValue(inp.value);
