@@ -626,6 +626,11 @@ async fn download_and_install_update(
 }
 
 #[tauri::command]
+async fn install_local_apk(app: AppHandle) -> Result<InstallUpdateOutcome, String> {
+  updater::install_local_apk(&app).await
+}
+
+#[tauri::command]
 async fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
   updater::open_external_url(&app, &url).await
 }
@@ -797,6 +802,7 @@ pub fn run() {
       reset_site_adapter_overrides,
       check_for_updates,
       download_and_install_update,
+      install_local_apk,
       open_external_url,
       export_sync_bundle,
       import_sync_bundle,

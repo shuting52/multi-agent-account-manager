@@ -1618,6 +1618,27 @@ body,
   -webkit-user-select: text;
 }
 
+.update-notes-section + .update-notes-section {
+  margin-top: 8px;
+}
+
+.update-notes-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 2px;
+}
+
+.update-notes-list {
+  margin: 0;
+  padding-left: 16px;
+  white-space: normal;
+}
+
+.update-notes-list li {
+  margin: 1px 0;
+}
+
 .update-progress-wrap {
   display: flex;
   flex-direction: column;

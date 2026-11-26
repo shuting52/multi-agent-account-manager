@@ -340,6 +340,7 @@ function scheduleDownloadToastDismiss(): void {
 const updateState: {
   checking: boolean;
   installing: boolean;
+  importingApk: boolean;
   result: UpdateCheckResult | null;
   progress: UpdateProgressEvent | null;
   error: string | null;
@@ -347,9 +348,11 @@ const updateState: {
   outcomeMessage: string | null;
   lastCheckedAt: number;
   lastFailedAt: number;
+  autoPromptedVersion: string | null;
 } = {
   checking: false,
   installing: false,
+  importingApk: false,
   result: null,
   progress: null,
   error: null,
@@ -357,6 +360,7 @@ const updateState: {
   outcomeMessage: null,
   lastCheckedAt: 0,
   lastFailedAt: 0,
+  autoPromptedVersion: null,
 };
 
 const scrollOffsets: Record<string, number> = {};
@@ -1045,6 +1049,15 @@ async function runCheckForUpdates(silent: boolean): Promise<void> {
     updateState.error = null;
     updateState.lastCheckedAt = Date.now();
     updateState.lastFailedAt = 0;
+    if (
+      res.hasUpdate &&
+      res.latestVersion !== updateState.autoPromptedVersion &&
+      modal.kind === "none" &&
+      !updateState.installing
+    ) {
+      updateState.autoPromptedVersion = res.latestVersion;
+      await setModal({ kind: "update" });
+    }
   } catch (err) {
     updateState.lastFailedAt = Date.now();
     if (!silent) {
@@ -1104,6 +1117,25 @@ async function runDownloadAndInstall(): Promise<void> {
     updateState.error = String(err);
   } finally {
     updateState.installing = false;
+    rerenderPreservingScroll();
+  }
+}
+
+async function runImportLocalApk(): Promise<void> {
+  if (updateState.importingApk || updateState.installing || updateState.checking) return;
+  updateState.importingApk = true;
+  updateState.error = null;
+  updateState.outcomeStatus = null;
+  updateState.outcomeMessage = "正在打开文件选择器，请选择手机上的 APK 文件…";
+  rerenderPreservingScroll();
+  try {
+    const outcome = await invoke<InstallUpdateOutcome>("install_local_apk");
+    updateState.outcomeStatus = outcome.status;
+    updateState.outcomeMessage = outcome.message;
+  } catch (err) {
+    updateState.error = String(err);
+  } finally {
+    updateState.importingApk = false;
     rerenderPreservingScroll();
   }
 }
@@ -1208,6 +1240,80 @@ function currentProvider(state: ManagerSnapshot): ProviderInfo {
   );
 }
 
+type ReleaseNoteSection = { title: string; items: string[] };
+
+const RELEASE_NOTE_SECTION_ORDER = ["增加", "优化", "删除", "其他", "更新内容"];
+
+function parseReleaseNotes(raw: string): ReleaseNoteSection[] {
+  const sections: ReleaseNoteSection[] = [];
+  const ensureSection = (title: string): ReleaseNoteSection => {
+    let s = sections.find((x) => x.title === title);
+    if (!s) {
+      s = { title, items: [] };
+      sections.push(s);
+    }
+    return s;
+  };
+  const normalizeSectionTitle = (word: string): string => {
+    if (word === "新增" || word === "新功能") return "增加";
+    if (word === "改进" || word === "修复" || word === "问题修复") return "优化";
+    if (word === "移除") return "删除";
+    if (word === "变更" || word === "更新内容") return "其他";
+    return word;
+  };
+  const classifyItem = (text: string): { section: string; item: string } => {
+    const commit = text.match(/^(feat|fix|perf|refactor|docs|chore)(\([^)]*\))?:\s*(.*)$/i);
+    if (commit) {
+      const kind = commit[1].toLowerCase();
+      const rest = commit[3] || text;
+      if (kind === "feat") return { section: "增加", item: rest };
+      if (kind === "fix" || kind === "perf" || kind === "refactor")
+        return { section: "优化", item: rest };
+      return { section: "其他", item: rest };
+    }
+    const headed = text.match(/^(增加|新增|优化|改进|修复|删除|移除|去掉|废弃)\s*[：:]\s*(.*)$/);
+    if (headed) {
+      return { section: normalizeSectionTitle(headed[1]), item: headed[2] || headed[1] };
+    }
+    const keyword = text.match(/^(增加|新增|优化|改进|修复|删除|移除|去掉|废弃)[了：:，、\s]/);
+    if (keyword) {
+      return { section: normalizeSectionTitle(keyword[1]), item: text };
+    }
+    return { section: "其他", item: text };
+  };
+
+  let current: ReleaseNoteSection | null = null;
+  for (const rawLine of raw.split(/\r?\n/)) {
+    let line = rawLine.trim();
+    if (!line) continue;
+    line = line.replace(/^#{1,6}\s*/, "");
+    const header = line.match(
+      /^(增加|新增|优化|改进|修复|删除|移除|更新内容|新功能|问题修复|变更|其他)\s*[：:]?\s*$/
+    );
+    if (header) {
+      current = ensureSection(normalizeSectionTitle(header[1]));
+      continue;
+    }
+    line = line.replace(/^(?:[-*•·]|\d+[.)、])\s*/, "");
+    if (!line) continue;
+    const { section, item } = classifyItem(line);
+    const explicit = /^(增加|新增|优化|改进|修复|删除|移除|去掉|废弃|feat|fix|perf|refactor)\b/i.test(
+      line
+    );
+    const target = current && !explicit ? current : ensureSection(section);
+    target.items.push(item);
+  }
+
+  const filled = sections.filter((s) => s.items.length > 0);
+  if (filled.length === 1 && filled[0].title === "其他") {
+    filled[0].title = "更新内容";
+  }
+  return filled.sort(
+    (a, b) =>
+      RELEASE_NOTE_SECTION_ORDER.indexOf(a.title) - RELEASE_NOTE_SECTION_ORDER.indexOf(b.title)
+  );
+}
+
 function renderUpdateModal(): string {
   const res = updateState.result;
   const curVer = res ? res.currentVersion : "...";
@@ -1240,7 +1346,16 @@ function renderUpdateModal(): string {
   } else if (res) {
     const noteText = res.releaseNotes.trim();
     if (hasUpdate) {
-      bodyHtml += `<div class="update-notes">${escapeHtml(noteText || "包含稳定性改进与问题修复。")}</div>`;
+      const noteSections = parseReleaseNotes(noteText);
+      bodyHtml +=
+        noteSections.length > 0
+          ? `<div class="update-notes">${noteSections
+              .map(
+                (s) =>
+                  `<div class="update-notes-section"><div class="update-notes-title">${escapeHtml(s.title)}</div><ul class="update-notes-list">${s.items.map((it) => `<li>${escapeHtml(it)}</li>`).join("")}</ul></div>`
+              )
+              .join("")}</div>`
+          : `<div class="update-notes">包含稳定性改进与问题修复。</div>`;
       if (!res.downloadUrl) {
         bodyHtml += `<div class="modal-desc">当前发布尚未包含本平台自动安装包，请点击「发布页」手动下载。</div>`;
       }
@@ -1303,6 +1418,15 @@ function renderUpdateModal(): string {
     ? `<button id="update-open-page-btn" class="btn" type="button">发布页</button>`
     : "";
 
+  const importApkBtn =
+    snapshot?.platform === "android"
+      ? `<button id="update-import-apk-btn" class="btn" type="button" ${
+          updateState.checking || updateState.installing || updateState.importingApk
+            ? "disabled"
+            : ""
+        }>${updateState.importingApk ? "选择安装包..." : "导入本地 APK"}</button>`
+      : "";
+
   return `
     <div class="${modalOverlayClass()}" role="dialog" aria-modal="true">
       <div class="modal-card">
@@ -1312,6 +1436,7 @@ function renderUpdateModal(): string {
         <div class="modal-footer">
           <button id="modal-cancel-btn" class="btn" type="button" ${updateState.installing ? "disabled" : ""}>关闭</button>
           ${pageBtn}
+          ${importApkBtn}
           ${primaryBtn}
         </div>
       </div>
@@ -1361,21 +1486,23 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
         ? `
           <div class="sync-section">
             <div class="sync-section-title">作为发送端（生成临时加密共享）</div>
+            <div class="modal-hint">用途：在这台设备上打包账号并生成一次性加密分享，另一台设备扫码或粘贴同步串拉取。分享 3 分钟后自动失效，最多被拉取 3 次，过期要重新生成。</div>
             <label class="sync-relay-toggle">
               <input id="sync-relay-toggle" type="checkbox" ${modal.relayEnabled ? "checked" : ""} ${busyAny ? "disabled" : ""} />
               <span>启用官网 / Cloudflare 加密中转通道（默认关闭，跨网或开代理时可选）</span>
             </label>
+            <div class="modal-hint">什么时候开：两台设备不在同一个 WiFi 时才开；同一 WiFi 下不用开，走局域网直连更快。开中转时服务端只暂存密文，看不到你的账号和口令。</div>
             ${
               modal.relayEnabled
                 ? `
               <div class="sync-privacy-note">不收集任何用户数据：每次同步均在本地随机生成一次性 256-bit 密钥进行 AES-256-GCM 端到端加密，密钥仅包含在二维码/同步串中，绝不上传服务端；服务端仅临时暂存纯密文，无法解密，3 分钟或拉取完成后立即销毁。</div>
               <div class="sync-inline-row">
-                <input id="sync-relay-url" class="modal-input" maxlength="260" placeholder="官网或自建 Cloudflare Worker 地址（https://...）" value="${escapeHtml(modal.relayUrlDraft)}" autocomplete="off" spellcheck="false" ${busyAny ? "disabled" : ""} />
+                <input id="sync-relay-url" class="modal-input" maxlength="260" placeholder="留空用官方中转；自建填 Cloudflare Worker 地址（https://...）" value="${escapeHtml(modal.relayUrlDraft)}" autocomplete="off" spellcheck="false" ${busyAny ? "disabled" : ""} />
                 <button id="sync-lan-start-btn" class="btn primary" type="button" ${busyAny ? "disabled" : ""}>${modal.lanShareBusy ? "上传密文中..." : isRelayActive ? "重新生成" : "生成随机加密中转码"}</button>
               </div>
             `
                 : `
-              <div class="modal-hint">默认仅通过本地局域网点对点直连（3 分钟或最多 3 次拉取后自动关闭）。</div>
+              <div class="modal-hint">默认仅通过本地局域网点对点直连（3 分钟或最多 3 次拉取后自动关闭）。口令是接收端拉取时要输入的，留空自动生成 6 位数字 PIN，生成后显示在下方二维码旁边。</div>
               <div class="sync-inline-row">
                 <input id="sync-lan-share-pass" class="modal-input" maxlength="64" placeholder="同步口令（留空自动生成 6 位数字 PIN）" value="${escapeHtml(modal.lanSharePassDraft)}" autocomplete="off" spellcheck="false" ${busyAny ? "disabled" : ""} />
                 <button id="sync-lan-start-btn" class="btn primary" type="button" ${busyAny ? "disabled" : ""}>${modal.lanShareBusy ? "开启中..." : shareInfo && !isRelayActive ? "重新开启" : "开启共享"}</button>
@@ -1386,6 +1513,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
               shareInfo
                 ? `
               <div class="sync-qr-wrap">
+                <div class="modal-hint">让另一台设备扫这个二维码，或点「复制同步串」把同步串发过去。同步串里含一次性密钥，别人拿到串加口令才能拉取，别发到公开群里。</div>
                 <div class="sync-qr-box">${shareInfo.qrSvg}</div>
                 <div class="sync-meta-grid">
                   <span class="sync-meta-label">${isRelayActive ? "中转通道" : "局域网地址"}</span>
@@ -1408,6 +1536,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
           </div>
           <div class="sync-section">
             <div class="sync-section-title">作为接收端（扫码或输入同步串拉取）</div>
+            <div class="modal-hint">用途：在这台设备上收另一台设备发来的账号。扫码后自动填好，直接点「拉取并合并」；手动粘贴同步串时，再填发送端显示的口令。同名账号会被更新，不会重复建号。</div>
             ${
               isMobilePlatform(state.platform)
                 ? `<button id="sync-lan-scan-btn" class="btn primary sync-scan-btn" type="button" ${busyAny ? "disabled" : ""}>${ICON_QR_SCAN}<span>${modal.lanScanBusy ? "正在识别并同步..." : "扫码直接同步"}</span></button>`
@@ -1415,7 +1544,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
             }
             <input id="sync-lan-pull-addr" class="modal-input" maxlength="512" placeholder="输入局域网地址或粘贴 maam-sync:// 同步串（支持局域网与中转码）" value="${escapeHtml(modal.lanPullAddrDraft)}" autocomplete="off" spellcheck="false" ${busyAny ? "disabled" : ""} />
             <div class="sync-inline-row">
-              <input id="sync-lan-pull-pass" class="modal-input" maxlength="128" placeholder="口令或二维码自动填入的端到端密钥片段" value="${escapeHtml(modal.lanPullPassDraft)}" autocomplete="off" spellcheck="false" ${busyAny ? "disabled" : ""} />
+              <input id="sync-lan-pull-pass" class="modal-input" maxlength="128" placeholder="口令：扫码后自动填；手动粘贴同步串时填发送端显示的口令" value="${escapeHtml(modal.lanPullPassDraft)}" autocomplete="off" spellcheck="false" ${busyAny ? "disabled" : ""} />
               <button id="sync-lan-pull-btn" class="btn primary" type="button" ${busyAny ? "disabled" : ""}>${modal.lanPullBusy ? "拉取中..." : "拉取并合并"}</button>
             </div>
           </div>
@@ -1423,9 +1552,10 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
         : `
           <div class="sync-section">
             <div class="sync-section-title">导出加密备份（.maam）</div>
-            <div class="modal-hint">AES-256-GCM 端到端加密包含所有账号、代理、时区、群聊与 Cookie 登录态。</div>
+            <div class="modal-hint">用途：换手机或重装后恢复全部账号。AES-256-GCM 端到端加密，包含所有账号、代理、时区、群聊与 Cookie 登录态。</div>
+            <div class="modal-hint">口令自己定（至少 4 位），导入时还要输这个口令，丢了口令这个文件就打不开，一定要记好。</div>
             <div class="sync-inline-row">
-              <input id="sync-file-export-pass" class="modal-input" type="password" maxlength="128" placeholder="设置加密口令（至少 4 位）" value="${escapeHtml(modal.fileExportPassDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""} />
+              <input id="sync-file-export-pass" class="modal-input" type="password" maxlength="128" placeholder="设置加密口令（至少 4 位，导入时要用，一定要记好）" value="${escapeHtml(modal.fileExportPassDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""} />
               <button id="sync-file-export-btn" class="btn primary" type="button" ${busyAny ? "disabled" : ""}>${modal.fileExportBusy ? "导出中..." : "导出备份"}</button>
             </div>
             ${
@@ -1443,6 +1573,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
           </div>
           <div class="sync-section">
             <div class="sync-section-title">导入并解密备份</div>
+            <div class="modal-hint">用途：把之前导出的 .maam 备份恢复到这台设备。选文件或粘贴密文都行，再输导出时设的口令。同名账号会被更新，不会重复建号。</div>
             <input id="sync-file-picker" class="sync-file-input" type="file" accept=".maam,.json,application/json,text/plain" ${busyAny ? "disabled" : ""} />
             ${modal.fileImportFileName ? `<div class="modal-hint">已读取文件：${escapeHtml(modal.fileImportFileName)}</div>` : ""}
             <textarea id="sync-file-import-json" class="modal-textarea compact-cookie-textarea" rows="3" placeholder="或直接在此粘贴 .maam 加密备份全文" spellcheck="false" ${busyAny ? "disabled" : ""}>${escapeHtml(modal.fileImportJsonDraft)}</textarea>
@@ -1456,6 +1587,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
       <div class="${modalOverlayClass()}" role="dialog" aria-modal="true">
         <div class="modal-card sync-modal-card">
           <div class="modal-title">多端加密同步</div>
+          <div class="modal-hint">作用：把这台设备上的账号（含登录态）加密传到另一台设备，接收端不用重新登录。两台设备都在手边，用「扫码 / 局域网」；换手机、重装后恢复，用「加密备份文件」。</div>
           <div class="sync-tabs">
             <button id="sync-tab-lan" class="sync-tab-btn ${modal.tab === "lan" ? "active" : ""}" type="button" ${busyAny ? "disabled" : ""}>扫码 / 局域网</button>
             <button id="sync-tab-file" class="sync-tab-btn ${modal.tab === "file" ? "active" : ""}" type="button" ${busyAny ? "disabled" : ""}>加密备份文件</button>
@@ -4454,6 +4586,10 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
       updateState.error = String(err);
       rerenderPreservingScroll();
     }
+  });
+
+  document.querySelector("#update-import-apk-btn")?.addEventListener("click", async () => {
+    await runImportLocalApk();
   });
 
   document.querySelectorAll<HTMLElement>("[data-resolve-uuid]").forEach((btn) => {

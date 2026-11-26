@@ -7,11 +7,11 @@ use tauri::Emitter;
 use url::Url;
 
 const LATEST_MANIFEST_URL: &str =
-  "https://github.com/ldjx7/multi-agent-account-manager/releases/latest/download/latest.json";
+  "https://github.com/shuting52/multi-agent-account-manager/releases/latest/download/latest.json";
 const GITHUB_LATEST_API_URL: &str =
-  "https://api.github.com/repos/ldjx7/multi-agent-account-manager/releases/latest";
+  "https://api.github.com/repos/shuting52/multi-agent-account-manager/releases/latest";
 const RELEASES_PAGE_URL: &str =
-  "https://github.com/ldjx7/multi-agent-account-manager/releases";
+  "https://github.com/shuting52/multi-agent-account-manager/releases";
 
 static UPDATE_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
@@ -913,6 +913,23 @@ pub async fn download_and_install_update(
         message: msg.to_string(),
       })
     }
+  }
+}
+
+pub async fn install_local_apk(app: &AppHandle) -> Result<InstallUpdateOutcome, String> {
+  #[cfg(target_os = "android")]
+  {
+    let res = crate::platform::mobile::pick_and_install_apk(app).await?;
+    Ok(InstallUpdateOutcome {
+      status: res.status,
+      message: res.message,
+    })
+  }
+
+  #[cfg(not(target_os = "android"))]
+  {
+    let _ = app;
+    Err("导入本地 APK 仅支持 Android".to_string())
   }
 }
 

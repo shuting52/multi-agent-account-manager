@@ -378,6 +378,18 @@ pub async fn scan_qr_code(app: &AppHandle) -> Result<MobileScanQrResponse, Strin
 }
 
 #[cfg(target_os = "android")]
+pub async fn pick_and_install_apk(
+  app: &AppHandle,
+) -> Result<AndroidInstallApkResponse, String> {
+  let bridge = app.state::<MobileSessionBridge<tauri::Wry>>();
+  bridge
+    .0
+    .run_mobile_plugin_async("pickAndInstallApk", serde_json::json!({}))
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "android")]
 pub async fn download_and_install_apk(
   app: &AppHandle,
   url: &str,
