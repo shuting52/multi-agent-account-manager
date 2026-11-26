@@ -12803,7 +12803,7 @@ impl SessionManager {
       }
     });
 
-    let result = match agent.kind {
+    let result: Result<String, String> = match agent.kind {
       ExternalAgentKind::OpenaiApi => {
         #[cfg(desktop)]
         {
