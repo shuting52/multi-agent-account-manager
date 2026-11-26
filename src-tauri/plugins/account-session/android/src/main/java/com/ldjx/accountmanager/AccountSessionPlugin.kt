@@ -1,17 +1,18 @@
 package com.ldjx.accountmanager
 
 import android.app.Activity
+import android.app.PendingIntent
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Intent
+import android.content.pm.PackageInstaller
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PersistableBundle
 import android.provider.Settings
-import androidx.core.content.FileProvider
 import androidx.webkit.ProfileStore
 import androidx.webkit.WebViewFeature
 import app.tauri.annotation.Command
@@ -637,9 +638,21 @@ class AccountSessionPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
+    /**
+     * 会话式安装：把 APK 流式写入 PackageInstaller session 后 commit。
+     * 系统仍会弹一次安装确认页让用户点「安装」（非系统应用省不掉这一步，
+     * 这里不承诺静默安装）；能省掉的是每次更新都被支去设置里开「允许安装
+     * 未知应用」——该授权开一次永久有效，预检见 checkInstallPermission。
+     * 安装结果由 InstallStatusReceiver 接收：用户点确认后安装成功即自动
+     * 拉起主界面，不用再点系统的「完成/打开」。
+     */
     private fun launchInstallIntentForApk(targetFile: File, invoke: Invoke) {
         activity.runOnUiThread {
             try {
+                // 兜底：授权万一在下载中途被撤掉，仍走旧的 needs_permission 返回，
+                // 由前端调 open_install_permission_settings 引导用户去开。
+                // 正常流程下前端已在下载前调 check_install_permission 预检过，
+                // 不应再走到这里。
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !activity.packageManager.canRequestPackageInstalls()) {
                     val permIntent = Intent(
                         Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
@@ -664,33 +677,115 @@ class AccountSessionPlugin(private val activity: Activity) : Plugin(activity) {
                     return@runOnUiThread
                 }
 
-                val apkUri = FileProvider.getUriForFile(
-                    activity,
-                    "${activity.packageName}.fileprovider",
-                    targetFile,
+                val packageInstaller = activity.packageManager.packageInstaller
+                val params = PackageInstaller.SessionParams(
+                    PackageInstaller.SessionParams.MODE_FULL_INSTALL,
                 )
-                val installIntent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(apkUri, "application/vnd.android.package-archive")
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                var sessionId = -1
+                try {
+                    sessionId = packageInstaller.createSession(params)
+                } catch (t: Throwable) {
+                    throw IllegalStateException("创建安装会话失败：${t.message ?: "未知错误"}")
                 }
-                activity.startActivity(installIntent)
-                val msg = "已调起系统安装器，请按提示完成覆盖更新"
-                AccountSessionCoordinator.emitUpdateProgress(
-                    stage = "ready",
-                    downloaded = targetFile.length(),
-                    total = targetFile.length(),
-                    percent = 100,
-                    message = msg,
-                )
+                val createdSessionId = sessionId
+                thread(name = "maam-install-apk") {
+                    try {
+                        packageInstaller.openSession(createdSessionId).use { session ->
+                            session.openWrite("base.apk", 0, targetFile.length()).use { out ->
+                                FileInputStream(targetFile).use { input ->
+                                    input.copyTo(out)
+                                }
+                                out.flush()
+                                session.fsync(out)
+                            }
+                            val statusIntent = Intent(activity, InstallStatusReceiver::class.java).apply {
+                                action = InstallStatusReceiver.ACTION_INSTALL_STATUS
+                            }
+                            val pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT or
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                    PendingIntent.FLAG_MUTABLE
+                                } else {
+                                    0
+                                }
+                            // PackageInstaller 往 status intent 里填安装结果 extras，
+                            // Android 12+ 必须用 FLAG_MUTABLE 的 PendingIntent。
+                            val statusPending = PendingIntent.getBroadcast(
+                                activity,
+                                createdSessionId,
+                                statusIntent,
+                                pendingFlags,
+                            )
+                            session.commit(statusPending.intentSender)
+                        }
+                        val msg = "已提交系统安装，请在弹出的安装确认页点「安装」完成更新"
+                        AccountSessionCoordinator.emitUpdateProgress(
+                            stage = "ready",
+                            downloaded = targetFile.length(),
+                            total = targetFile.length(),
+                            percent = 100,
+                            message = msg,
+                        )
+                        val ret = JSObject().apply {
+                            put("status", "installer_launched")
+                            put("message", msg)
+                        }
+                        invoke.resolve(ret)
+                    } catch (t: Throwable) {
+                        runCatching { packageInstaller.abandonSession(createdSessionId) }
+                        val err = t.message ?: "提交系统安装失败"
+                        AccountSessionCoordinator.emitUpdateProgress("error", 0L, null, null, err)
+                        invoke.reject(err)
+                    }
+                }
+            } catch (t: Throwable) {
+                val err = t.message ?: "提交系统安装失败"
+                AccountSessionCoordinator.emitUpdateProgress("error", 0L, null, null, err)
+                invoke.reject(err)
+            }
+        }
+    }
+
+    /**
+     * 前端下载前预检：当前应用是否已被允许安装未知来源应用。
+     * Android O 以下没有这项授权，直接返回 true。
+     */
+    @Command
+    fun checkInstallPermission(invoke: Invoke) {
+        activity.runOnUiThread {
+            try {
+                val canInstall = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    activity.packageManager.canRequestPackageInstalls()
+                } else {
+                    true
+                }
                 val ret = JSObject().apply {
-                    put("status", "installer_launched")
-                    put("message", msg)
+                    put("canInstall", canInstall)
                 }
                 invoke.resolve(ret)
             } catch (t: Throwable) {
-                val err = t.message ?: "调起系统安装器失败"
-                AccountSessionCoordinator.emitUpdateProgress("error", 0L, null, null, err)
-                invoke.reject(err)
+                invoke.reject(t.message ?: "检测安装授权失败")
+            }
+        }
+    }
+
+    /**
+     * 打开系统「允许安装未知来源应用」设置页（本应用）。
+     * 无返回值；用户开完返回 App 后由前端重新调 check_install_permission 确认。
+     */
+    @Command
+    fun openInstallPermissionSettings(invoke: Invoke) {
+        activity.runOnUiThread {
+            try {
+                val permIntent = Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:${activity.packageName}"),
+                ).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                activity.startActivity(permIntent)
+                invoke.resolve(JSObject())
+            } catch (t: Throwable) {
+                invoke.reject(t.message ?: "无法打开安装授权设置页")
             }
         }
     }

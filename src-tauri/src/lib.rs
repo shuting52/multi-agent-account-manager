@@ -20,7 +20,7 @@ use sync_bundle::{ExportSyncBundleResponse, LanSyncShareInfo};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
-use updater::{InstallUpdateOutcome, InstallUpdateRequest, UpdateCheckResult};
+use updater::{InstallPermissionStatus, InstallUpdateOutcome, InstallUpdateRequest, UpdateCheckResult};
 
 #[cfg(desktop)]
 static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -631,6 +631,16 @@ async fn install_local_apk(app: AppHandle) -> Result<InstallUpdateOutcome, Strin
 }
 
 #[tauri::command]
+async fn check_install_permission(app: AppHandle) -> Result<InstallPermissionStatus, String> {
+  updater::check_install_permission(&app).await
+}
+
+#[tauri::command]
+async fn open_install_permission_settings(app: AppHandle) -> Result<(), String> {
+  updater::open_install_permission_settings(&app).await
+}
+
+#[tauri::command]
 async fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
   updater::open_external_url(&app, &url).await
 }
@@ -803,6 +813,8 @@ pub fn run() {
       check_for_updates,
       download_and_install_update,
       install_local_apk,
+      check_install_permission,
+      open_install_permission_settings,
       open_external_url,
       export_sync_bundle,
       import_sync_bundle,

@@ -25,5 +25,15 @@
             android:configChanges="orientation|keyboardHidden|screenSize"
             android:exported="false"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <!-- PackageInstaller 安装状态接收器：安装成功后自动拉起主界面。
+             只收本应用显式发来的 PendingIntent（action 见
+             InstallStatusReceiver.ACTION_INSTALL_STATUS），不对外暴露。 -->
+        <receiver
+            android:name="com.ldjx.accountmanager.InstallStatusReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.ldjx.accountmanager.INSTALL_STATUS" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

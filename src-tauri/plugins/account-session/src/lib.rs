@@ -429,3 +429,39 @@ pub async fn download_and_install_apk(
     .await
     .map_err(|e| e.to_string())
 }
+
+#[cfg(target_os = "android")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallPermissionStatus {
+  pub can_install: bool,
+}
+
+/// 前端在下载更新前预检：是否已允许安装未知来源应用。
+/// Kotlin 侧对应 checkInstallPermission（Android O 以下直接返回 true）。
+#[cfg(target_os = "android")]
+pub async fn check_install_permission(
+  app: &AppHandle,
+) -> Result<InstallPermissionStatus, String> {
+  let bridge = app.state::<MobileSessionBridge<tauri::Wry>>();
+  bridge
+    .0
+    .run_mobile_plugin_async("checkInstallPermission", serde_json::json!({}))
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// 打开系统「允许安装未知来源应用」设置页（本应用）。无返回值。
+#[cfg(target_os = "android")]
+pub async fn open_install_permission_settings(app: &AppHandle) -> Result<(), String> {
+  let bridge = app.state::<MobileSessionBridge<tauri::Wry>>();
+  bridge
+    .0
+    .run_mobile_plugin_async::<serde_json::Value>(
+      "openInstallPermissionSettings",
+      serde_json::json!({}),
+    )
+    .await
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}

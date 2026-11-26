@@ -43,6 +43,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -102,6 +103,18 @@ class AccountWebActivity : AppCompatActivity() {
     private var lastDownloadedUri: Uri? = null
     private var lastDownloadedMime: String = "*/*"
     private var lastDownloadedFallbackDir: File? = null
+
+    // Cue 登录页加载失败（CloudFront 403 等）专用状态：只用于 cue.im /
+    // manus.im 主页面，Muse/Hark 页面不走这套逻辑。
+    private lateinit var cueErrorCardRoot: FrameLayout
+    private lateinit var cueErrorBodyView: TextView
+    private var cueRetryDesktopUaTried: Boolean = false
+    private var cueRetryRootTried: Boolean = false
+    private var cueRetryInFlight: Boolean = false
+    private var cueFailureHandling: Boolean = false
+    private var cueErrorShown: Boolean = false
+    private var cueFailedUrl: String? = null
+    private var cueOriginalUserAgent: String? = null
 
     private data class BlobInitMeta(
         val generation: Long,
@@ -498,6 +511,10 @@ class AccountWebActivity : AppCompatActivity() {
 
         private const val ANDROID_DOWNLOAD_BRIDGE_NAME = "__maamAndroidDownload"
         private const val MAX_BLOB_DOWNLOAD_BYTES = 256L * 1024L * 1024L
+
+        // Cue 登录页自动重试用的桌面版 Chrome UA（只换 UA，不改其他设置）。
+        private const val CUE_DESKTOP_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
         private val DOWNLOAD_HINT_EXTENSIONS = setOf(
             "pdf", "zip", "rar", "7z", "tar", "gz", "tgz",
@@ -1008,6 +1025,235 @@ class AccountWebActivity : AppCompatActivity() {
         ).toInt()
     }
 
+    /**
+     * Cue 登录页打不开时的中文错误卡（盖住 CloudFront 原生 403 白页）。
+     * 只在 Cue 页面加载失败时展示；Muse/Hark 页面不受影响。
+     * 四个按钮：[刷新] [在浏览器中打开] [导入 Cookie] [换节点后重试]，
+     * 其中「换节点后重试」只是文案提示，点它等于刷新。
+     */
+    private fun buildCueErrorCard(): FrameLayout {
+        cueErrorBodyView = TextView(this).apply {
+            text = ""
+            setTextColor(Color.parseColor("#374151"))
+            textSize = 14f
+            setLineSpacing(dp(4).toFloat(), 1f)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                topMargin = dp(8)
+            }
+        }
+
+        val titleView = TextView(this).apply {
+            text = "Cue 登录页打不开"
+            setTextColor(Color.parseColor("#111827"))
+            textSize = 17f
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            )
+        }
+
+        fun cueButton(label: String, onClick: () -> Unit): Button {
+            return Button(this).apply {
+                text = label
+                textSize = 13f
+                isAllCaps = false
+                minWidth = 0
+                minimumWidth = 0
+                setPadding(dp(6), dp(4), dp(6), dp(4))
+                layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    1f,
+                ).apply {
+                    marginEnd = dp(8)
+                }
+                setOnClickListener { onClick() }
+            }
+        }
+
+        val firstRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                topMargin = dp(16)
+            }
+        }
+        firstRow.addView(cueButton("刷新") { retryCueManually() })
+        firstRow.addView(cueButton("在浏览器中打开") { openCueLoginInBrowser() })
+
+        val secondRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                topMargin = dp(8)
+            }
+        }
+        secondRow.addView(cueButton("导入 Cookie") { returnToAccountList() })
+        secondRow.addView(cueButton("换节点后重试") { retryCueManually() })
+
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+            background = GradientDrawable().apply {
+                setColor(Color.WHITE)
+                cornerRadius = dp(16).toFloat()
+                setStroke(dp(1), Color.parseColor("#E5E7EB"))
+            }
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER,
+            ).apply {
+                setMargins(dp(24), dp(24), dp(24), dp(24))
+            }
+        }
+        card.addView(titleView)
+        card.addView(cueErrorBodyView)
+        card.addView(firstRow)
+        card.addView(secondRow)
+
+        cueErrorCardRoot = FrameLayout(this).apply {
+            visibility = View.GONE
+            setBackgroundColor(Color.parseColor("#F7F7F7"))
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+        }
+        cueErrorCardRoot.addView(card)
+        return cueErrorCardRoot
+    }
+
+    private fun isCuePageUrl(rawUrl: String?): Boolean {
+        if (rawUrl.isNullOrBlank()) return false
+        val host = runCatching { Uri.parse(rawUrl).host?.lowercase() }.getOrNull() ?: return false
+        return host == "cue.im" || host.endsWith(".cue.im") ||
+            host == "manus.im" || host.endsWith(".manus.im")
+    }
+
+    /**
+     * 只处理 Cue（cue.im / manus.im）主页面的加载失败；Muse/Hark 页面
+     * 不进这里，保持原有行为。
+     * 403 是 Cue 的 CloudFront 在对方拦了当前网络（常因 VPN 出口 IP），
+     * App 侧绕不过去：先自动换桌面版 Chrome UA 重载一次，再试
+     * https://cue.im/ 根地址一次，各最多一次；两次都失败才展示错误卡，
+     * 写明换个 VPN 节点最可能解决。
+     */
+    private fun handleCueLoadFailure(
+        spec: AndroidAccountSessionSpec,
+        failingUrl: String?,
+        httpStatus: Int?,
+    ) {
+        if (currentSpec !== spec) return
+        if (!isCuePageUrl(failingUrl)) return
+        if (cueErrorShown || cueFailureHandling) return
+        val wv = mainWebView ?: return
+        cueFailedUrl = failingUrl
+        cueFailureHandling = true
+        if (!cueRetryDesktopUaTried) {
+            cueRetryDesktopUaTried = true
+            val ok = runCatching { retryCueWithDesktopUa(failingUrl) }.isSuccess
+            if (!ok) {
+                cueFailureHandling = false
+                restoreCueUserAgent()
+                showCueErrorCard(httpStatus)
+            }
+            return
+        }
+        if (!cueRetryRootTried) {
+            cueRetryRootTried = true
+            restoreCueUserAgent()
+            val ok = runCatching {
+                cueRetryInFlight = true
+                wv.loadUrl("https://cue.im/")
+            }.isSuccess
+            if (!ok) {
+                cueFailureHandling = false
+                showCueErrorCard(httpStatus)
+            }
+            return
+        }
+        restoreCueUserAgent()
+        showCueErrorCard(httpStatus)
+    }
+
+    private fun retryCueWithDesktopUa(failingUrl: String?) {
+        val wv = mainWebView ?: return
+        if (cueOriginalUserAgent == null) {
+            cueOriginalUserAgent = wv.settings.userAgentString
+        }
+        wv.settings.userAgentString = CUE_DESKTOP_USER_AGENT
+        cueRetryInFlight = true
+        val target = failingUrl?.takeIf { it.isNotBlank() } ?: currentSpec?.entryUrl ?: return
+        wv.loadUrl(target)
+    }
+
+    private fun restoreCueUserAgent() {
+        val original = cueOriginalUserAgent ?: return
+        cueOriginalUserAgent = null
+        runCatching { mainWebView?.settings?.userAgentString = original }
+    }
+
+    private fun showCueErrorCard(httpStatus: Int?) {
+        cueErrorShown = true
+        loadingView.visibility = View.GONE
+        // 保持 WebView 不可见，确保 CloudFront 原生错误白页不会露出来。
+        mainWebView?.visibility = View.INVISIBLE
+        cueErrorBodyView.text = when {
+            httpStatus == 403 -> "对方服务器拒绝了当前网络（CloudFront 返回 403），不是 App 拦的。换个 VPN 节点最可能解决。"
+            httpStatus != null -> "Cue 登录页返回了 HTTP $httpStatus，对方服务器拒绝了当前网络。换个 VPN 节点最可能解决。"
+            else -> "Cue 登录页加载失败，当前网络连不上对方服务器。换个 VPN 节点最可能解决。"
+        }
+        cueErrorCardRoot.visibility = View.VISIBLE
+    }
+
+    private fun hideCueErrorCard() {
+        cueErrorShown = false
+        cueErrorCardRoot.visibility = View.GONE
+    }
+
+    private fun resetCueFailureState() {
+        cueRetryDesktopUaTried = false
+        cueRetryRootTried = false
+        cueRetryInFlight = false
+        cueFailureHandling = false
+        cueFailedUrl = null
+        restoreCueUserAgent()
+        if (::cueErrorCardRoot.isInitialized) {
+            hideCueErrorCard()
+        }
+    }
+
+    /** 手动刷新 / 换节点后重试：恢复默认 UA、清掉重试计数，重新加载当前页。 */
+    private fun retryCueManually() {
+        resetCueFailureState()
+        val target = mainWebView ?: return
+        if (target.url.isNullOrBlank()) {
+            currentSpec?.let { target.loadUrl(it.entryUrl) }
+        } else {
+            target.reload()
+        }
+    }
+
+    private fun openCueLoginInBrowser() {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://cue.im/login")).apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+        } catch (t: Throwable) {
+            Toast.makeText(this, "无法打开系统浏览器", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun buildNativeHierarchy() {
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.parseColor("#F7F7F7"))
@@ -1109,6 +1355,7 @@ class AccountWebActivity : AppCompatActivity() {
 
         contentFrame.addView(loadingView)
         contentFrame.addView(mainWebContainer)
+        contentFrame.addView(buildCueErrorCard())
         column.addView(topBar)
         column.addView(contentFrame)
 
@@ -1277,6 +1524,7 @@ class AccountWebActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
     fun bindSessionSpec(spec: AndroidAccountSessionSpec) {
         releaseSessionViews(keepPage = true)
+        resetCueFailureState()
 
         currentSpec = spec
         activeSessionGeneration.incrementAndGet()
@@ -1341,6 +1589,14 @@ class AccountWebActivity : AppCompatActivity() {
         wv.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                 if (view !== mainWebView || currentSpec !== spec) return
+                // Cue 失败重试中的加载不重置重试计数；其余新导航恢复默认 UA
+                // 并清掉错误卡（用户手动刷新也重新获得一次自动重试额度）。
+                cueFailureHandling = false
+                if (cueRetryInFlight) {
+                    cueRetryInFlight = false
+                } else {
+                    resetCueFailureState()
+                }
                 mainLoadFailed = false
                 committedAuthority = null
                 spec.timezoneInitScript?.takeIf { it.isNotBlank() }?.let { tzScript ->
@@ -1352,6 +1608,7 @@ class AccountWebActivity : AppCompatActivity() {
                 if (view === mainWebView && currentSpec === spec && request.isForMainFrame) {
                     mainLoadFailed = true
                     committedAuthority = null
+                    handleCueLoadFailure(spec, request.url?.toString(), null)
                 }
             }
 
@@ -1359,6 +1616,9 @@ class AccountWebActivity : AppCompatActivity() {
                 if (view === mainWebView && currentSpec === spec && request.isForMainFrame) {
                     mainLoadFailed = true
                     committedAuthority = null
+                    if (errorResponse.statusCode >= 400) {
+                        handleCueLoadFailure(spec, request.url?.toString(), errorResponse.statusCode)
+                    }
                 }
             }
 

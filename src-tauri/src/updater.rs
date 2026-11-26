@@ -933,6 +933,46 @@ pub async fn install_local_apk(app: &AppHandle) -> Result<InstallUpdateOutcome, 
   }
 }
 
+/// 前端在下载更新前预检安装授权。Android 上透传插件的
+/// checkInstallPermission；非 Android 直接返回可以安装（走桌面安装流程）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallPermissionStatus {
+  pub can_install: bool,
+}
+
+pub async fn check_install_permission(
+  app: &AppHandle,
+) -> Result<InstallPermissionStatus, String> {
+  #[cfg(target_os = "android")]
+  {
+    let res = crate::platform::mobile::check_install_permission(app).await?;
+    Ok(InstallPermissionStatus {
+      can_install: res.can_install,
+    })
+  }
+
+  #[cfg(not(target_os = "android"))]
+  {
+    let _ = app;
+    Ok(InstallPermissionStatus { can_install: true })
+  }
+}
+
+/// 打开系统「允许安装未知来源应用」设置页（本应用）。仅 Android。
+pub async fn open_install_permission_settings(app: &AppHandle) -> Result<(), String> {
+  #[cfg(target_os = "android")]
+  {
+    crate::platform::mobile::open_install_permission_settings(app).await
+  }
+
+  #[cfg(not(target_os = "android"))]
+  {
+    let _ = app;
+    Err("安装授权设置仅支持 Android".to_string())
+  }
+}
+
 pub async fn open_external_url(app: &AppHandle, raw_url: &str) -> Result<(), String> {
   let parsed = Url::parse(raw_url.trim()).map_err(|_| "无效的链接地址".to_string())?;
   if parsed.scheme() != "https" {

@@ -328,6 +328,51 @@ function clearDownloadToastTimer(): void {
   }
 }
 
+// 轻量更新提示：无新版时只显示「已是最新版本 vX.Y.Z」，3 秒自动消失，
+// 不打开更新弹窗、不带更新说明、不带包大小、不带任何按钮。
+let updateToast: { message: string } | null = null;
+let updateToastTimer: number | undefined;
+
+function clearUpdateToastTimer(): void {
+  if (updateToastTimer !== undefined) {
+    window.clearTimeout(updateToastTimer);
+    updateToastTimer = undefined;
+  }
+}
+
+function showUpdateToast(message: string): void {
+  clearUpdateToastTimer();
+  updateToast = { message };
+  updateToastTimer = window.setTimeout(() => {
+    updateToast = null;
+    rerenderPreservingScroll();
+  }, 3000);
+  rerenderPreservingScroll();
+}
+
+function showUpdateToastSticky(message: string): void {
+  clearUpdateToastTimer();
+  updateToast = { message };
+  rerenderPreservingScroll();
+}
+
+function clearUpdateToast(): void {
+  clearUpdateToastTimer();
+  if (updateToast) {
+    updateToast = null;
+    rerenderPreservingScroll();
+  }
+}
+
+function renderUpdateToast(): string {
+  if (!updateToast) return "";
+  return `
+    <div class="update-toast" role="status" aria-live="polite">
+      <span>${escapeHtml(updateToast.message)}</span>
+    </div>
+  `;
+}
+
 function scheduleDownloadToastDismiss(): void {
   clearDownloadToastTimer();
   if (!downloadToast || downloadToast.status === "started") return;
@@ -341,6 +386,7 @@ const updateState: {
   checking: boolean;
   installing: boolean;
   importingApk: boolean;
+  installPermissionNeeded: boolean;
   result: UpdateCheckResult | null;
   progress: UpdateProgressEvent | null;
   error: string | null;
@@ -353,6 +399,7 @@ const updateState: {
   checking: false,
   installing: false,
   importingApk: false,
+  installPermissionNeeded: false,
   result: null,
   progress: null,
   error: null,
@@ -1039,10 +1086,12 @@ function formatProgressSummary(evt: UpdateProgressEvent): string {
 async function runCheckForUpdates(silent: boolean): Promise<void> {
   if (updateState.checking || updateState.installing) return;
   updateState.checking = true;
+  updateState.installPermissionNeeded = false;
   if (!silent) {
     updateState.error = null;
     updateState.outcomeStatus = null;
     updateState.outcomeMessage = null;
+    showUpdateToastSticky("正在检查更新…");
     if (modal.kind === "update") {
       rerenderPreservingScroll();
     }
@@ -1053,23 +1102,41 @@ async function runCheckForUpdates(silent: boolean): Promise<void> {
     updateState.error = null;
     updateState.lastCheckedAt = Date.now();
     updateState.lastFailedAt = 0;
-    if (
-      res.hasUpdate &&
-      res.latestVersion !== updateState.autoPromptedVersion &&
-      modal.kind === "none" &&
-      !updateState.installing
-    ) {
-      updateState.autoPromptedVersion = res.latestVersion;
-      await setModal({ kind: "update" });
+    if (res.hasUpdate) {
+      // 有新版才弹更新弹窗。res.releaseNotes 来自 latest.json 当期最新版
+      // （见 src-tauri/src/updater.rs：先读 manifest.notes，读不到才回退
+      // 到 GitHub 最新 Release 的 body），不会再出现旧版说明。
+      // 手动检查每次都弹；自动静默检查只对未提示过的版本弹一次。
+      clearUpdateToast();
+      if (
+        modal.kind === "none" &&
+        !updateState.installing &&
+        (!silent || res.latestVersion !== updateState.autoPromptedVersion)
+      ) {
+        updateState.autoPromptedVersion = res.latestVersion;
+        await setModal({ kind: "update" });
+      }
+    } else {
+      // 无新版：一律不打开更新弹窗。自动静默检查本来就不打扰；
+      // 只有用户手动点检查时给一个 3 秒轻提示。
+      if (modal.kind === "update") {
+        await setModal({ kind: "none" });
+      }
+      if (!silent) {
+        showUpdateToast(`已是最新版本 v${res.currentVersion}`);
+      } else {
+        clearUpdateToast();
+      }
     }
   } catch (err) {
     updateState.lastFailedAt = Date.now();
     if (!silent) {
       updateState.error = String(err);
+      showUpdateToast("检查更新失败，请稍后重试");
     }
   } finally {
     updateState.checking = false;
-    if (!silent || updateState.result?.hasUpdate || modal.kind === "update") {
+    if (!silent || updateState.result?.hasUpdate || modal.kind === "update" || updateToast) {
       rerenderPreservingScroll();
     }
   }
@@ -1090,9 +1157,47 @@ async function maybeAutoCheckForUpdates(): Promise<void> {
   }
 }
 
+// 安装授权预检（安卓）：命令由 Rust/Kotlin 侧提供。
+// 未实现或非安卓时返回 null，视为未知、不拦截，直接走原下载流程。
+const INSTALL_PERMISSION_PROMPTED_KEY = "maam-install-permission-prompted";
+
+async function checkInstallPermission(): Promise<boolean | null> {
+  try {
+    const res = await invoke<{ canInstall: boolean }>("check_install_permission");
+    return res.canInstall;
+  } catch {
+    return null;
+  }
+}
+
 async function runDownloadAndInstall(): Promise<void> {
   const res = updateState.result;
   if (!res?.downloadUrl || updateState.checking || updateState.installing) return;
+  // 安卓安装授权预检：没授权且从未提示过时，先在更新弹窗里提示一次
+  // （一句说明 +「去开启安装权限」按钮），记下已提示标记后不再拦截；
+  // 授权已拿到、或已提示过、或命令未实现时，直接下载安装。
+  if (snapshot?.platform === "android") {
+    const permitted = await checkInstallPermission();
+    if (permitted === false) {
+      let prompted = false;
+      try {
+        prompted = localStorage.getItem(INSTALL_PERMISSION_PROMPTED_KEY) === "1";
+      } catch {
+        // 忽略存储异常，按未提示过处理
+      }
+      if (!prompted) {
+        try {
+          localStorage.setItem(INSTALL_PERMISSION_PROMPTED_KEY, "1");
+        } catch {
+          // 忽略存储异常
+        }
+        updateState.installPermissionNeeded = true;
+        rerenderPreservingScroll();
+        return;
+      }
+    }
+    updateState.installPermissionNeeded = false;
+  }
   updateState.installing = true;
   updateState.error = null;
   updateState.outcomeStatus = null;
@@ -1419,7 +1524,7 @@ function renderUpdateModal(): string {
     updateState.installing ||
     updateState.outcomeStatus === "restarting";
   const primaryBtn = canInstall
-    ? `<sakuga-button id="update-install-btn" type="button" ${disablePrimary ? "disabled" : ""}>${
+    ? `<sakuga-button class="btn-compact" id="update-install-btn" type="button" ${disablePrimary ? "disabled" : ""}>${
         updateState.installing
           ? "更新中..."
           : updateState.outcomeStatus === "needs_permission"
@@ -1428,17 +1533,17 @@ function renderUpdateModal(): string {
               ? "前往下载 IPA"
               : "立即下载并更新"
       }</sakuga-button>`
-    : `<sakuga-button id="update-recheck-btn" type="button" ${disablePrimary ? "disabled" : ""}>${
+    : `<sakuga-button class="btn-compact" id="update-recheck-btn" type="button" ${disablePrimary ? "disabled" : ""}>${
         updateState.checking ? "检查中..." : "重新检查"
       }</sakuga-button>`;
 
   const pageBtn = res?.releasePageUrl
-    ? `<sakuga-button id="update-open-page-btn" variant="secondary" type="button">发布页</sakuga-button>`
+    ? `<sakuga-button class="btn-compact" id="update-open-page-btn" variant="secondary" type="button">发布页</sakuga-button>`
     : "";
 
   const importApkBtn =
     snapshot?.platform === "android"
-      ? `<sakuga-button id="update-import-apk-btn" variant="secondary" type="button" ${
+      ? `<sakuga-button class="btn-compact" id="update-import-apk-btn" variant="secondary" type="button" ${
           updateState.checking || updateState.installing || updateState.importingApk
             ? "disabled"
             : ""
@@ -1451,8 +1556,13 @@ function renderUpdateModal(): string {
         <div class="modal-title">${title}</div>
         ${versionRow}
         ${bodyHtml}
+        ${updateState.installPermissionNeeded && hasUpdate ? `
+        <div class="update-permission-box">
+          <span>安装更新前，需要先开启「允许安装未知应用」权限（只需开启一次，之后更新不再提示；安装时仍需在系统安装页点一下「安装」确认）。</span>
+          <sakuga-button class="btn-compact" id="update-open-permission-btn" variant="secondary" type="button">去开启安装权限</sakuga-button>
+        </div>` : ""}
         <div class="modal-footer">
-          <sakuga-button id="modal-cancel-btn" variant="secondary" type="button" ${updateState.installing ? "disabled" : ""}>关闭</sakuga-button>
+          <sakuga-button class="btn-compact" id="modal-cancel-btn" variant="secondary" type="button" ${updateState.installing ? "disabled" : ""}>关闭</sakuga-button>
           ${pageBtn}
           ${importApkBtn}
           ${primaryBtn}
@@ -1513,14 +1623,14 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
               <div class="sync-privacy-note">不收集任何用户数据：每次同步均在本地随机生成一次性 256-bit 密钥进行 AES-256-GCM 端到端加密，密钥仅包含在二维码/同步串中，绝不上传服务端；服务端仅临时暂存纯密文，无法解密，3 分钟或拉取完成后立即销毁。</div>
               <div class="sync-inline-row">
                 <sakuga-input id="sync-relay-url" maxlength="260" label="中转地址" placeholder="留空用官方中转；自建填 Cloudflare Worker 地址（https://...）" value="${escapeHtml(modal.relayUrlDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
-                <sakuga-button id="sync-lan-start-btn" type="button" ${busyAny ? "disabled" : ""}>${modal.lanShareBusy ? "上传密文中..." : isRelayActive ? "重新生成" : "生成随机加密中转码"}</sakuga-button>
+                <sakuga-button class="btn-compact" id="sync-lan-start-btn" type="button" ${busyAny ? "disabled" : ""}>${modal.lanShareBusy ? "上传密文中..." : isRelayActive ? "重新生成" : "生成随机加密中转码"}</sakuga-button>
               </div>
             `
                 : `
               <div class="modal-hint">默认仅通过本地局域网点对点直连（3 分钟或最多 3 次拉取后自动关闭）。口令是接收端拉取时要输入的，留空自动生成 6 位数字 PIN，生成后显示在下方二维码旁边。</div>
               <div class="sync-inline-row">
                 <sakuga-input id="sync-lan-share-pass" maxlength="64" label="同步口令" placeholder="同步口令（留空自动生成 6 位数字 PIN）" value="${escapeHtml(modal.lanSharePassDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
-                <sakuga-button id="sync-lan-start-btn" type="button" ${busyAny ? "disabled" : ""}>${modal.lanShareBusy ? "开启中..." : shareInfo && !isRelayActive ? "重新开启" : "开启共享"}</sakuga-button>
+                <sakuga-button class="btn-compact" id="sync-lan-start-btn" type="button" ${busyAny ? "disabled" : ""}>${modal.lanShareBusy ? "开启中..." : shareInfo && !isRelayActive ? "重新开启" : "开启共享"}</sakuga-button>
               </div>
             `
             }
@@ -1554,13 +1664,13 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
             <div class="modal-hint">用途：在这台设备上收另一台设备发来的账号。扫码后自动填好，直接点「拉取并合并」；手动粘贴同步串时，再填发送端显示的口令。同名账号会被更新，不会重复建号。</div>
             ${
               isMobilePlatform(state.platform)
-                ? `<sakuga-button id="sync-lan-scan-btn" class="sync-scan-btn" type="button" ${busyAny ? "disabled" : ""}>${ICON_QR_SCAN}<span>${modal.lanScanBusy ? "正在识别并同步..." : "扫码直接同步"}</span></sakuga-button>`
+                ? `<sakuga-button id="sync-lan-scan-btn" class="btn-compact sync-scan-btn" type="button" ${busyAny ? "disabled" : ""}>${ICON_QR_SCAN}<span>${modal.lanScanBusy ? "正在识别并同步..." : "扫码直接同步"}</span></sakuga-button>`
                 : ""
             }
             <sakuga-input id="sync-lan-pull-addr" maxlength="512" label="同步串或局域网地址" placeholder="输入局域网地址或粘贴 maam-sync:// 同步串（支持局域网与中转码）" value="${escapeHtml(modal.lanPullAddrDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
             <div class="sync-inline-row">
               <sakuga-input id="sync-lan-pull-pass" maxlength="128" label="拉取口令" placeholder="口令：扫码后自动填；手动粘贴同步串时填发送端显示的口令" value="${escapeHtml(modal.lanPullPassDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
-              <sakuga-button id="sync-lan-pull-btn" type="button" ${busyAny ? "disabled" : ""}>${modal.lanPullBusy ? "拉取中..." : "拉取并合并"}</sakuga-button>
+              <sakuga-button class="btn-compact" id="sync-lan-pull-btn" type="button" ${busyAny ? "disabled" : ""}>${modal.lanPullBusy ? "拉取中..." : "拉取并合并"}</sakuga-button>
             </div>
           </div>
         `
@@ -1571,7 +1681,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
             <div class="modal-hint">口令自己定（至少 4 位），导入时还要输这个口令，丢了口令这个文件就打不开，一定要记好。</div>
             <div class="sync-inline-row">
               <sakuga-input id="sync-file-export-pass" maxlength="128" label="加密口令" type="password" placeholder="设置加密口令（至少 4 位，导入时要用，一定要记好）" value="${escapeHtml(modal.fileExportPassDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
-              <sakuga-button id="sync-file-export-btn" type="button" ${busyAny ? "disabled" : ""}>${modal.fileExportBusy ? "导出中..." : "导出备份"}</sakuga-button>
+              <sakuga-button class="btn-compact" id="sync-file-export-btn" type="button" ${busyAny ? "disabled" : ""}>${modal.fileExportBusy ? "导出中..." : "导出备份"}</sakuga-button>
             </div>
             ${
               exportRes
@@ -1594,7 +1704,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
             <textarea id="sync-file-import-json" class="modal-textarea compact-cookie-textarea" rows="3" placeholder="或直接在此粘贴 .maam 加密备份全文" spellcheck="false" ${busyAny ? "disabled" : ""}>${escapeHtml(modal.fileImportJsonDraft)}</textarea>
             <div class="sync-inline-row">
               <sakuga-input id="sync-file-import-pass" maxlength="128" label="解密口令" type="password" placeholder="输入备份时的解密口令" value="${escapeHtml(modal.fileImportPassDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
-              <sakuga-button id="sync-file-import-btn" type="button" ${busyAny ? "disabled" : ""}>${modal.fileImportBusy ? "导入中..." : "解密并导入"}</sakuga-button>
+              <sakuga-button class="btn-compact" id="sync-file-import-btn" type="button" ${busyAny ? "disabled" : ""}>${modal.fileImportBusy ? "导入中..." : "解密并导入"}</sakuga-button>
             </div>
           </div>
         `;
@@ -1616,7 +1726,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
           ${modal.copyHint ? `<div class="modal-hint">${escapeHtml(modal.copyHint)}</div>` : ""}
           ${modal.error ? `<div id="modal-error-box" class="update-error-box" role="alert">${escapeHtml(modal.error)}</div>` : ""}
           <div class="modal-footer">
-            <sakuga-button id="modal-cancel-btn" variant="secondary" type="button" ${busyAny ? "disabled" : ""}>关闭</sakuga-button>
+            <sakuga-button class="btn-compact" id="modal-cancel-btn" variant="secondary" type="button" ${busyAny ? "disabled" : ""}>关闭</sakuga-button>
           </div>
         </div>
       </div>
@@ -1691,8 +1801,8 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
           </div>
           ${modal.error ? `<div id="modal-error-box" class="update-error-box" role="alert">${escapeHtml(modal.error)}</div>` : ""}
           <div class="modal-footer">
-            <sakuga-button id="modal-cancel-btn" variant="secondary" type="button" ${saving ? "disabled" : ""}>取消</sakuga-button>
-            <sakuga-button id="modal-confirm-btn" type="button" ${saving ? "disabled" : ""}>${saving ? "保存中..." : "保存"}</sakuga-button>
+            <sakuga-button class="btn-compact" id="modal-cancel-btn" variant="secondary" type="button" ${saving ? "disabled" : ""}>取消</sakuga-button>
+            <sakuga-button class="btn-compact" id="modal-confirm-btn" type="button" ${saving ? "disabled" : ""}>${saving ? "保存中..." : "保存"}</sakuga-button>
           </div>
         </div>
       </div>
@@ -1743,21 +1853,22 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
           ${cookieInfo ? `<div class="cookie-detail-box ${cookieInfo.tone}" title="${escapeHtml(cookieInfo.tooltip)}"><span class="cookie-expiry-dot"></span><span>${escapeHtml(cookieInfo.detailText)}</span></div>` : ""}
           <div class="cookie-import-section">
             <label class="modal-desc" for="modal-cookie-import-input">${creating ? "导入 Cookie（可选，支持从 Chrome 等浏览器登录后粘贴）" : "导入 Cookie（支持从 Chrome 等浏览器登录后粘贴）"}</label>
-            <textarea id="modal-cookie-import-input" class="modal-textarea compact-cookie-textarea" rows="3" placeholder="粘贴 Cookie 请求头（a=1; b=2）、Netscape cookies.txt 或浏览器导出的 JSON 数组..." ${saving ? "disabled" : ""}>${escapeHtml(modal.cookieDraft ?? "")}</textarea>
             ${creating ? `
-              <div class="modal-hint">留空则创建后手动登录；粘贴 Cookie 后点击「创建并打开」将直接导入并登录。</div>
+            <textarea id="modal-cookie-import-input" class="modal-textarea compact-cookie-textarea" rows="3" placeholder="粘贴 Cookie 请求头（a=1; b=2）、Netscape cookies.txt 或浏览器导出的 JSON 数组..." ${saving ? "disabled" : ""}>${escapeHtml(modal.cookieDraft ?? "")}</textarea>
+            <div class="modal-hint">留空则创建后手动登录；粘贴 Cookie 后点击「创建并打开」将直接导入并登录。</div>
             ` : `
-              <div class="cookie-import-actions">
-                <span class="modal-hint">适用于 Google OAuth 无法在内置窗口直接登录的场景；导入后自动刷新当前账号。</span>
-                <button id="modal-import-cookie-btn" class="btn mini-test-btn" type="button" ${saving || modal.cookieImporting ? "disabled" : ""}>${modal.cookieImporting ? "导入中..." : "导入 Cookie"}</button>
-              </div>
+            <div class="cookie-import-row">
+              <textarea id="modal-cookie-import-input" class="modal-textarea compact-cookie-textarea" rows="3" placeholder="粘贴 Cookie 请求头（a=1; b=2）、Netscape cookies.txt 或浏览器导出的 JSON 数组..." ${saving ? "disabled" : ""}>${escapeHtml(modal.cookieDraft ?? "")}</textarea>
+              <button id="modal-import-cookie-btn" class="btn mini-test-btn" type="button" ${saving || modal.cookieImporting ? "disabled" : ""}>${modal.cookieImporting ? "导入中..." : "导入 Cookie"}</button>
+            </div>
+            <div class="modal-hint">适用于 Google OAuth 无法在内置窗口直接登录的场景；导入后自动刷新当前账号。</div>
             `}
           </div>
           ${modal.error ? `<div id="modal-error-box" class="update-error-box" role="alert">${escapeHtml(modal.error)}</div>` : ""}
           <div class="modal-footer">
-            ${!creating ? `<sakuga-button id="modal-clear-data-btn" class="danger-btn left-action" variant="secondary" type="button" ${saving ? "disabled" : ""}>${modal.confirmClear ? "确认清空？" : "清空登录缓存"}</sakuga-button>` : ""}
-            <sakuga-button id="modal-cancel-btn" variant="secondary" type="button" ${saving ? "disabled" : ""}>取消</sakuga-button>
-            <sakuga-button id="modal-confirm-btn" type="button" ${saving ? "disabled" : ""}>${saving ? (creating ? "创建中..." : "保存中...") : (creating ? "创建并打开" : "保存")}</sakuga-button>
+            ${!creating ? `<sakuga-button id="modal-clear-data-btn" class="btn-compact danger-btn" variant="secondary" type="button" ${saving ? "disabled" : ""}>${modal.confirmClear ? "确认清空？" : "清空登录缓存"}</sakuga-button>` : ""}
+            <sakuga-button class="btn-compact" id="modal-cancel-btn" variant="secondary" type="button" ${saving ? "disabled" : ""}>取消</sakuga-button>
+            <sakuga-button class="btn-compact" id="modal-confirm-btn" type="button" ${saving ? "disabled" : ""}>${saving ? (creating ? "创建中..." : "保存中...") : (creating ? "创建并打开" : "保存")}</sakuga-button>
           </div>
         </div>
       </div>
@@ -1891,8 +2002,8 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
           <div id="modal-group-hint" class="modal-hint">${escapeHtml(hintText)}</div>
           ${gModal.error ? `<div id="modal-error-box" class="update-error-box" role="alert">${escapeHtml(gModal.error)}</div>` : ""}
           <div class="modal-footer">
-            <sakuga-button id="modal-cancel-btn" variant="secondary" type="button" ${saving ? "disabled" : ""}>取消</sakuga-button>
-            <sakuga-button id="modal-confirm-btn" type="button" ${saving || gModal.selectedMembers.length === 0 ? "disabled" : ""}>${saving ? (editing ? "保存中..." : "创建中...") : (editing ? "保存" : "创建群聊")}</sakuga-button>
+            <sakuga-button class="btn-compact" id="modal-cancel-btn" variant="secondary" type="button" ${saving ? "disabled" : ""}>取消</sakuga-button>
+            <sakuga-button class="btn-compact" id="modal-confirm-btn" type="button" ${saving || gModal.selectedMembers.length === 0 ? "disabled" : ""}>${saving ? (editing ? "保存中..." : "创建中...") : (editing ? "保存" : "创建群聊")}</sakuga-button>
           </div>
         </div>
       </div>
@@ -2059,8 +2170,8 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
           ${tabBody}
           ${kModal.error ? `<div id="modal-error-box" class="update-error-box" role="alert">${escapeHtml(kModal.error)}</div>` : ""}
           <div class="modal-footer">
-            <sakuga-button id="modal-cancel-btn" variant="secondary" type="button" ${saving ? "disabled" : ""}>取消</sakuga-button>
-            <sakuga-button id="modal-confirm-btn" type="button" ${saving ? "disabled" : ""}>${confirmLabel}</sakuga-button>
+            <sakuga-button class="btn-compact" id="modal-cancel-btn" variant="secondary" type="button" ${saving ? "disabled" : ""}>取消</sakuga-button>
+            <sakuga-button class="btn-compact" id="modal-confirm-btn" type="button" ${saving ? "disabled" : ""}>${confirmLabel}</sakuga-button>
           </div>
         </div>
       </div>
@@ -2144,7 +2255,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
           </div>
           ${eModal.error ? `<div id="modal-error-box" class="update-error-box" role="alert">${escapeHtml(eModal.error)}</div>` : ""}
           <div class="modal-footer">
-            <sakuga-button id="modal-cancel-btn" type="button" ${saving ? "disabled" : ""}>完成</sakuga-button>
+            <sakuga-button class="btn-compact" id="modal-cancel-btn" type="button" ${saving ? "disabled" : ""}>完成</sakuga-button>
           </div>
         </div>
       </div>
@@ -2157,8 +2268,8 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
           <div class="modal-title">删除群聊「${escapeHtml(modal.group.name)}」</div>
           <div class="modal-desc">将删除该群聊及本地群聊记录。各成员账号与原生网页历史不受影响。</div>
           <div class="modal-footer">
-            <sakuga-button id="modal-cancel-btn" variant="secondary" type="button">取消</sakuga-button>
-            <sakuga-button id="modal-confirm-btn" class="danger-btn" variant="secondary" type="button">确认删除</sakuga-button>
+            <sakuga-button class="btn-compact" id="modal-cancel-btn" variant="secondary" type="button">取消</sakuga-button>
+            <sakuga-button id="modal-confirm-btn" class="btn-compact danger-btn" variant="secondary" type="button">确认删除</sakuga-button>
           </div>
         </div>
       </div>
@@ -2170,8 +2281,8 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
         <div class="modal-title">移除「${escapeHtml(modal.account.alias)}」</div>
         <div class="modal-desc">将关闭该视图并彻底清除本机独立浏览资料（Cookie 与存储）。云端账号及历史对话仍由官方保留。</div>
         <div class="modal-footer">
-          <sakuga-button id="modal-cancel-btn" variant="secondary" type="button">取消</sakuga-button>
-          <sakuga-button id="modal-confirm-btn" class="danger-btn" variant="secondary" type="button">确认移除</sakuga-button>
+          <sakuga-button class="btn-compact" id="modal-cancel-btn" variant="secondary" type="button">取消</sakuga-button>
+          <sakuga-button id="modal-confirm-btn" class="btn-compact danger-btn" variant="secondary" type="button">确认移除</sakuga-button>
         </div>
       </div>
     </div>
@@ -2441,6 +2552,7 @@ function renderMiddleContent(state: ManagerSnapshot, provider: ProviderInfo): st
     ${conflictsHtml}
     <div class="account-list">${listBody}</div>
     ${renderDownloadToast()}
+    ${renderUpdateToast()}
     ${renderModal(state, provider)}
   `;
 }
@@ -2846,6 +2958,7 @@ function renderGroupMiddleContent(state: ManagerSnapshot, provider: ProviderInfo
     ${noticeHtml}
     <div class="account-list">${listBody}</div>
     ${renderDownloadToast()}
+    ${renderUpdateToast()}
     ${renderModal(state, provider)}
   `;
 }
@@ -4033,7 +4146,10 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
         .join("");
       mentionMenuEl.hidden = false;
       mentionMenuEl.querySelectorAll<HTMLButtonElement>("[data-mention-idx]").forEach((btn) => {
-        btn.addEventListener("mousedown", (ev) => {
+        // 触摸设备上点选必须用 pointerdown：它在 textarea 失焦（blur 后 120ms
+        // 隐藏菜单）之前触发；只绑 mousedown 时，移动端合成的鼠标事件
+        // 晚于隐藏定时器，点选会点空，@ 选不进人。
+        btn.addEventListener("pointerdown", (ev) => {
           ev.preventDefault();
           const idx = Number(btn.dataset.mentionIdx ?? "-1");
           if (idx >= 0) applyMentionCandidate(idx);
@@ -4616,13 +4732,17 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
 
   document.querySelector("#check-update-btn")?.addEventListener("click", async () => {
     if (modal.kind !== "none") return;
-    await setModal({ kind: "update" });
-    const stale =
-      !updateState.result ||
-      (!updateState.result.hasUpdate && Date.now() - updateState.lastCheckedAt > 5 * 60 * 1000);
-    if (stale && !updateState.checking && !updateState.installing) {
-      await runCheckForUpdates(false);
+    // 5 分钟内刚查过且无新版：直接给轻提示，不再联网重查。
+    const freshNoUpdate =
+      updateState.result &&
+      !updateState.result.hasUpdate &&
+      Date.now() - updateState.lastCheckedAt <= 5 * 60 * 1000;
+    if (freshNoUpdate) {
+      showUpdateToast(`已是最新版本 v${updateState.result!.currentVersion}`);
+      return;
     }
+    // 无新版时 runCheckForUpdates 只显示轻提示，不打开更新弹窗。
+    await runCheckForUpdates(false);
   });
 
   document.querySelector("#update-recheck-btn")?.addEventListener("click", async () => {
@@ -4631,6 +4751,38 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
 
   document.querySelector("#update-install-btn")?.addEventListener("click", async () => {
     await runDownloadAndInstall();
+  });
+
+  document.querySelector("#update-open-permission-btn")?.addEventListener("click", async () => {
+    try {
+      await invoke("open_install_permission_settings");
+    } catch (err) {
+      updateState.error = String(err);
+      rerenderPreservingScroll();
+      return;
+    }
+    // 用户从系统设置页回来后复查一次，授权已拿到就自动继续下载安装。
+    const onReturn = async () => {
+      window.removeEventListener("focus", onReturn);
+      const ok = await checkInstallPermission();
+      if (ok === true) {
+        updateState.installPermissionNeeded = false;
+        updateState.error = null;
+        rerenderPreservingScroll();
+        await runDownloadAndInstall();
+      } else {
+        rerenderPreservingScroll();
+      }
+    };
+    window.addEventListener("focus", onReturn);
+    const okNow = await checkInstallPermission();
+    if (okNow === true) {
+      window.removeEventListener("focus", onReturn);
+      updateState.installPermissionNeeded = false;
+      updateState.error = null;
+      rerenderPreservingScroll();
+      await runDownloadAndInstall();
+    }
   });
 
   document.querySelector("#update-open-page-btn")?.addEventListener("click", async () => {
