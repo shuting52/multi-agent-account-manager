@@ -1167,16 +1167,25 @@ async function setModal(next: ModalMode): Promise<void> {
   }
   render();
   if (next.kind === "add" || next.kind === "rename") {
-    const input = document.querySelector<HTMLInputElement>("#modal-alias-input");
+    const input = document.querySelector<HTMLElement>("#modal-alias-input");
     if (input) {
       input.focus();
-      input.select();
+      // Sakuga 输入框没有 select()，全选要调 shadow DOM 里的 inner input。
+      if (input.tagName === "SAKUGA-INPUT") {
+        (input as unknown as { shadowRoot?: ShadowRoot | null }).shadowRoot?.querySelector("input")?.select();
+      } else {
+        (input as HTMLInputElement).select();
+      }
     }
   } else if (next.kind === "group") {
-    const input = document.querySelector<HTMLInputElement>("#modal-group-name-input");
+    const input = document.querySelector<HTMLElement>("#modal-group-name-input");
     if (input) {
       input.focus();
-      input.select();
+      if (input.tagName === "SAKUGA-INPUT") {
+        (input as unknown as { shadowRoot?: ShadowRoot | null }).shadowRoot?.querySelector("input")?.select();
+      } else {
+        (input as HTMLInputElement).select();
+      }
     }
   } else if (next.kind === "group-knowledge") {
     document.querySelector<HTMLTextAreaElement>("#modal-group-context-input")?.focus();
@@ -1374,16 +1383,21 @@ function renderUpdateModal(): string {
   if (showProgress) {
     lastRenderedUpdateStage = prog.stage;
     const isIndeterminate = prog.percent === null;
-    const widthStyle = isIndeterminate ? "" : `style="width:${Math.max(0, Math.min(100, prog.percent!))}%"`;
+    // 确定进度用 Sakuga 进度条（由 bindEvents / 进度事件直接 set() 定位）；
+    // 不确定态（percent 为 null）仍用原生长条，避免行为变化。
     bodyHtml += `
       <div class="update-progress-wrap">
         <div class="update-progress-meta">
           <span id="update-progress-text">${escapeHtml(prog.message)}</span>
           <span id="update-progress-pct" class="update-progress-pct">${escapeHtml(formatProgressSummary(prog))}</span>
         </div>
-        <div class="update-progress-track">
-          <div id="update-progress-bar" class="update-progress-fill ${isIndeterminate ? "indeterminate" : ""}" ${widthStyle}></div>
-        </div>
+        ${
+          isIndeterminate
+            ? `<div class="update-progress-track">
+          <div id="update-progress-bar" class="update-progress-fill indeterminate"></div>
+        </div>`
+            : `<sakuga-progress id="update-progress-bar" label="正在更新"></sakuga-progress>`
+        }
       </div>
     `;
   }
@@ -1401,7 +1415,7 @@ function renderUpdateModal(): string {
     updateState.installing ||
     updateState.outcomeStatus === "restarting";
   const primaryBtn = canInstall
-    ? `<button id="update-install-btn" class="btn primary" type="button" ${disablePrimary ? "disabled" : ""}>${
+    ? `<sakuga-button id="update-install-btn" type="button" ${disablePrimary ? "disabled" : ""}>${
         updateState.installing
           ? "更新中..."
           : updateState.outcomeStatus === "needs_permission"
@@ -1409,22 +1423,22 @@ function renderUpdateModal(): string {
             : snapshot?.platform === "ios"
               ? "前往下载 IPA"
               : "立即下载并更新"
-      }</button>`
-    : `<button id="update-recheck-btn" class="btn primary" type="button" ${disablePrimary ? "disabled" : ""}>${
+      }</sakuga-button>`
+    : `<sakuga-button id="update-recheck-btn" type="button" ${disablePrimary ? "disabled" : ""}>${
         updateState.checking ? "检查中..." : "重新检查"
-      }</button>`;
+      }</sakuga-button>`;
 
   const pageBtn = res?.releasePageUrl
-    ? `<button id="update-open-page-btn" class="btn" type="button">发布页</button>`
+    ? `<sakuga-button id="update-open-page-btn" variant="secondary" type="button">发布页</sakuga-button>`
     : "";
 
   const importApkBtn =
     snapshot?.platform === "android"
-      ? `<button id="update-import-apk-btn" class="btn" type="button" ${
+      ? `<sakuga-button id="update-import-apk-btn" variant="secondary" type="button" ${
           updateState.checking || updateState.installing || updateState.importingApk
             ? "disabled"
             : ""
-        }>${updateState.importingApk ? "选择安装包..." : "导入本地 APK"}</button>`
+        }>${updateState.importingApk ? "选择安装包..." : "导入本地 APK"}</sakuga-button>`
       : "";
 
   return `
@@ -1434,7 +1448,7 @@ function renderUpdateModal(): string {
         ${versionRow}
         ${bodyHtml}
         <div class="modal-footer">
-          <button id="modal-cancel-btn" class="btn" type="button" ${updateState.installing ? "disabled" : ""}>关闭</button>
+          <sakuga-button id="modal-cancel-btn" variant="secondary" type="button" ${updateState.installing ? "disabled" : ""}>关闭</sakuga-button>
           ${pageBtn}
           ${importApkBtn}
           ${primaryBtn}
@@ -1487,25 +1501,22 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
           <div class="sync-section">
             <div class="sync-section-title">作为发送端（生成临时加密共享）</div>
             <div class="modal-hint">用途：在这台设备上打包账号并生成一次性加密分享，另一台设备扫码或粘贴同步串拉取。分享 3 分钟后自动失效，最多被拉取 3 次，过期要重新生成。</div>
-            <label class="sync-relay-toggle">
-              <input id="sync-relay-toggle" type="checkbox" ${modal.relayEnabled ? "checked" : ""} ${busyAny ? "disabled" : ""} />
-              <span>启用官网 / Cloudflare 加密中转通道（默认关闭，跨网或开代理时可选）</span>
-            </label>
+            <sakuga-checkbox id="sync-relay-toggle" ${modal.relayEnabled ? "checked" : ""} ${busyAny ? "disabled" : ""}>启用官网 / Cloudflare 加密中转通道（默认关闭，跨网或开代理时可选）</sakuga-checkbox>
             <div class="modal-hint">什么时候开：两台设备不在同一个 WiFi 时才开；同一 WiFi 下不用开，走局域网直连更快。开中转时服务端只暂存密文，看不到你的账号和口令。</div>
             ${
               modal.relayEnabled
                 ? `
               <div class="sync-privacy-note">不收集任何用户数据：每次同步均在本地随机生成一次性 256-bit 密钥进行 AES-256-GCM 端到端加密，密钥仅包含在二维码/同步串中，绝不上传服务端；服务端仅临时暂存纯密文，无法解密，3 分钟或拉取完成后立即销毁。</div>
               <div class="sync-inline-row">
-                <input id="sync-relay-url" class="modal-input" maxlength="260" placeholder="留空用官方中转；自建填 Cloudflare Worker 地址（https://...）" value="${escapeHtml(modal.relayUrlDraft)}" autocomplete="off" spellcheck="false" ${busyAny ? "disabled" : ""} />
-                <button id="sync-lan-start-btn" class="btn primary" type="button" ${busyAny ? "disabled" : ""}>${modal.lanShareBusy ? "上传密文中..." : isRelayActive ? "重新生成" : "生成随机加密中转码"}</button>
+                <sakuga-input id="sync-relay-url" label="中转地址" placeholder="留空用官方中转；自建填 Cloudflare Worker 地址（https://...）" value="${escapeHtml(modal.relayUrlDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
+                <sakuga-button id="sync-lan-start-btn" type="button" ${busyAny ? "disabled" : ""}>${modal.lanShareBusy ? "上传密文中..." : isRelayActive ? "重新生成" : "生成随机加密中转码"}</sakuga-button>
               </div>
             `
                 : `
               <div class="modal-hint">默认仅通过本地局域网点对点直连（3 分钟或最多 3 次拉取后自动关闭）。口令是接收端拉取时要输入的，留空自动生成 6 位数字 PIN，生成后显示在下方二维码旁边。</div>
               <div class="sync-inline-row">
-                <input id="sync-lan-share-pass" class="modal-input" maxlength="64" placeholder="同步口令（留空自动生成 6 位数字 PIN）" value="${escapeHtml(modal.lanSharePassDraft)}" autocomplete="off" spellcheck="false" ${busyAny ? "disabled" : ""} />
-                <button id="sync-lan-start-btn" class="btn primary" type="button" ${busyAny ? "disabled" : ""}>${modal.lanShareBusy ? "开启中..." : shareInfo && !isRelayActive ? "重新开启" : "开启共享"}</button>
+                <sakuga-input id="sync-lan-share-pass" label="同步口令" placeholder="同步口令（留空自动生成 6 位数字 PIN）" value="${escapeHtml(modal.lanSharePassDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
+                <sakuga-button id="sync-lan-start-btn" type="button" ${busyAny ? "disabled" : ""}>${modal.lanShareBusy ? "开启中..." : shareInfo && !isRelayActive ? "重新开启" : "开启共享"}</sakuga-button>
               </div>
             `
             }
@@ -1539,13 +1550,13 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
             <div class="modal-hint">用途：在这台设备上收另一台设备发来的账号。扫码后自动填好，直接点「拉取并合并」；手动粘贴同步串时，再填发送端显示的口令。同名账号会被更新，不会重复建号。</div>
             ${
               isMobilePlatform(state.platform)
-                ? `<button id="sync-lan-scan-btn" class="btn primary sync-scan-btn" type="button" ${busyAny ? "disabled" : ""}>${ICON_QR_SCAN}<span>${modal.lanScanBusy ? "正在识别并同步..." : "扫码直接同步"}</span></button>`
+                ? `<sakuga-button id="sync-lan-scan-btn" class="sync-scan-btn" type="button" ${busyAny ? "disabled" : ""}>${ICON_QR_SCAN}<span>${modal.lanScanBusy ? "正在识别并同步..." : "扫码直接同步"}</span></sakuga-button>`
                 : ""
             }
-            <input id="sync-lan-pull-addr" class="modal-input" maxlength="512" placeholder="输入局域网地址或粘贴 maam-sync:// 同步串（支持局域网与中转码）" value="${escapeHtml(modal.lanPullAddrDraft)}" autocomplete="off" spellcheck="false" ${busyAny ? "disabled" : ""} />
+            <sakuga-input id="sync-lan-pull-addr" label="同步串或局域网地址" placeholder="输入局域网地址或粘贴 maam-sync:// 同步串（支持局域网与中转码）" value="${escapeHtml(modal.lanPullAddrDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
             <div class="sync-inline-row">
-              <input id="sync-lan-pull-pass" class="modal-input" maxlength="128" placeholder="口令：扫码后自动填；手动粘贴同步串时填发送端显示的口令" value="${escapeHtml(modal.lanPullPassDraft)}" autocomplete="off" spellcheck="false" ${busyAny ? "disabled" : ""} />
-              <button id="sync-lan-pull-btn" class="btn primary" type="button" ${busyAny ? "disabled" : ""}>${modal.lanPullBusy ? "拉取中..." : "拉取并合并"}</button>
+              <sakuga-input id="sync-lan-pull-pass" label="拉取口令" placeholder="口令：扫码后自动填；手动粘贴同步串时填发送端显示的口令" value="${escapeHtml(modal.lanPullPassDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
+              <sakuga-button id="sync-lan-pull-btn" type="button" ${busyAny ? "disabled" : ""}>${modal.lanPullBusy ? "拉取中..." : "拉取并合并"}</sakuga-button>
             </div>
           </div>
         `
@@ -1555,8 +1566,8 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
             <div class="modal-hint">用途：换手机或重装后恢复全部账号。AES-256-GCM 端到端加密，包含所有账号、代理、时区、群聊与 Cookie 登录态。</div>
             <div class="modal-hint">口令自己定（至少 4 位），导入时还要输这个口令，丢了口令这个文件就打不开，一定要记好。</div>
             <div class="sync-inline-row">
-              <input id="sync-file-export-pass" class="modal-input" type="password" maxlength="128" placeholder="设置加密口令（至少 4 位，导入时要用，一定要记好）" value="${escapeHtml(modal.fileExportPassDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""} />
-              <button id="sync-file-export-btn" class="btn primary" type="button" ${busyAny ? "disabled" : ""}>${modal.fileExportBusy ? "导出中..." : "导出备份"}</button>
+              <sakuga-input id="sync-file-export-pass" label="加密口令" type="password" placeholder="设置加密口令（至少 4 位，导入时要用，一定要记好）" value="${escapeHtml(modal.fileExportPassDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
+              <sakuga-button id="sync-file-export-btn" type="button" ${busyAny ? "disabled" : ""}>${modal.fileExportBusy ? "导出中..." : "导出备份"}</sakuga-button>
             </div>
             ${
               exportRes
@@ -1578,8 +1589,8 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
             ${modal.fileImportFileName ? `<div class="modal-hint">已读取文件：${escapeHtml(modal.fileImportFileName)}</div>` : ""}
             <textarea id="sync-file-import-json" class="modal-textarea compact-cookie-textarea" rows="3" placeholder="或直接在此粘贴 .maam 加密备份全文" spellcheck="false" ${busyAny ? "disabled" : ""}>${escapeHtml(modal.fileImportJsonDraft)}</textarea>
             <div class="sync-inline-row">
-              <input id="sync-file-import-pass" class="modal-input" type="password" maxlength="128" placeholder="输入备份时的解密口令" value="${escapeHtml(modal.fileImportPassDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""} />
-              <button id="sync-file-import-btn" class="btn primary" type="button" ${busyAny ? "disabled" : ""}>${modal.fileImportBusy ? "导入中..." : "解密并导入"}</button>
+              <sakuga-input id="sync-file-import-pass" label="解密口令" type="password" placeholder="输入备份时的解密口令" value="${escapeHtml(modal.fileImportPassDraft)}" autocomplete="off" ${busyAny ? "disabled" : ""}></sakuga-input>
+              <sakuga-button id="sync-file-import-btn" type="button" ${busyAny ? "disabled" : ""}>${modal.fileImportBusy ? "导入中..." : "解密并导入"}</sakuga-button>
             </div>
           </div>
         `;
@@ -1588,10 +1599,10 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
         <div class="modal-card sync-modal-card">
           <div class="modal-title">多端加密同步</div>
           <div class="modal-hint">作用：把这台设备上的账号（含登录态）加密传到另一台设备，接收端不用重新登录。两台设备都在手边，用「扫码 / 局域网」；换手机、重装后恢复，用「加密备份文件」。</div>
-          <div class="sync-tabs">
-            <button id="sync-tab-lan" class="sync-tab-btn ${modal.tab === "lan" ? "active" : ""}" type="button" ${busyAny ? "disabled" : ""}>扫码 / 局域网</button>
-            <button id="sync-tab-file" class="sync-tab-btn ${modal.tab === "file" ? "active" : ""}" type="button" ${busyAny ? "disabled" : ""}>加密备份文件</button>
-          </div>
+          <sakuga-tabs id="sync-tabs" label="同步方式" selected="${modal.tab === "lan" ? 0 : 1}">
+            <option value="lan">扫码 / 局域网</option>
+            <option value="file">加密备份文件</option>
+          </sakuga-tabs>
           ${tabBody}
           ${
             summary
@@ -1601,7 +1612,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
           ${modal.copyHint ? `<div class="modal-hint">${escapeHtml(modal.copyHint)}</div>` : ""}
           ${modal.error ? `<div id="modal-error-box" class="update-error-box" role="alert">${escapeHtml(modal.error)}</div>` : ""}
           <div class="modal-footer">
-            <button id="modal-cancel-btn" class="btn" type="button" ${busyAny ? "disabled" : ""}>关闭</button>
+            <sakuga-button id="modal-cancel-btn" variant="secondary" type="button" ${busyAny ? "disabled" : ""}>关闭</sakuga-button>
           </div>
         </div>
       </div>
@@ -1632,19 +1643,16 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
       <div class="${modalOverlayClass()}" role="dialog" aria-modal="true">
         <div class="modal-card">
           <div class="modal-title">桌面端设置</div>
-          <label class="setting-row" for="modal-tray-checkbox">
-            <span class="setting-label">关闭主窗口时最小化到系统托盘</span>
-            <input id="modal-tray-checkbox" class="setting-checkbox" type="checkbox" ${modal.minimizeToTray ? "checked" : ""} ${saving ? "disabled" : ""} />
-          </label>
-          <label class="setting-row" for="modal-auto-approve-checkbox">
-            <span class="setting-label">自动审批权限请求（前台与后台保活账号）</span>
-            <input id="modal-auto-approve-checkbox" class="setting-checkbox" type="checkbox" ${modal.autoApprove ? "checked" : ""} ${saving ? "disabled" : ""} />
-          </label>
+          <div class="setting-row">
+            <sakuga-checkbox id="modal-tray-checkbox" ${modal.minimizeToTray ? "checked" : ""} ${saving ? "disabled" : ""}>关闭主窗口时最小化到系统托盘</sakuga-checkbox>
+          </div>
+          <div class="setting-row">
+            <sakuga-checkbox id="modal-auto-approve-checkbox" ${modal.autoApprove ? "checked" : ""} ${saving ? "disabled" : ""}>自动审批权限请求（前台与后台保活账号）</sakuga-checkbox>
+          </div>
           <div class="modal-hint">开启后，已预热保活的工具授权弹窗将自动点击允许，并跳过删除/退出/支付等高危操作。</div>
-          <label class="setting-row" for="modal-isolate-proxy-checkbox">
-            <span class="setting-label">同代理仅保活当前账号（防多号同 IP 限流）</span>
-            <input id="modal-isolate-proxy-checkbox" class="setting-checkbox" type="checkbox" ${modal.isolateSameProxyKeepAlive ? "checked" : ""} ${saving ? "disabled" : ""} />
-          </label>
+          <div class="setting-row">
+            <sakuga-checkbox id="modal-isolate-proxy-checkbox" ${modal.isolateSameProxyKeepAlive ? "checked" : ""} ${saving ? "disabled" : ""}>同代理仅保活当前账号（防多号同 IP 限流）</sakuga-checkbox>
+          </div>
           <div class="modal-hint">开启后，未配独立代理或共用同一代理的同平台账号仅保持当前活跃窗口，切号自动释放旧窗口；关闭则恢复全部后台预热保活。</div>
           <div class="setting-field">
             <div class="setting-field-head">
@@ -1666,7 +1674,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
               <label class="modal-desc" for="modal-shortcut-input">全局呼出 / 隐藏快捷键</label>
               <span class="shortcut-status-pill ${state.globalShortcutActive ? "ok" : state.globalShortcutError ? "err" : ""}" title="${escapeHtml(statusText)}">${escapeHtml(state.globalShortcutActive ? "已生效" : state.globalShortcutError ? "注册失败" : "未启用")}</span>
             </div>
-            <input id="modal-shortcut-input" class="modal-input" maxlength="80" placeholder="CommandOrControl+Shift+M（留空禁用）" value="${escapeHtml(modal.globalShortcut)}" autocomplete="off" spellcheck="false" ${saving ? "disabled" : ""} />
+            <sakuga-input id="modal-shortcut-input" label="全局快捷键" placeholder="CommandOrControl+Shift+M（留空禁用）" value="${escapeHtml(modal.globalShortcut)}" autocomplete="off" ${saving ? "disabled" : ""}></sakuga-input>
             <div class="preset-chips">
               ${shortcutPresets
                 .map(
@@ -1679,8 +1687,8 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
           </div>
           ${modal.error ? `<div id="modal-error-box" class="update-error-box" role="alert">${escapeHtml(modal.error)}</div>` : ""}
           <div class="modal-footer">
-            <button id="modal-cancel-btn" class="btn" type="button" ${saving ? "disabled" : ""}>取消</button>
-            <button id="modal-confirm-btn" class="btn primary" type="button" ${saving ? "disabled" : ""}>${saving ? "保存中..." : "保存"}</button>
+            <sakuga-button id="modal-cancel-btn" variant="secondary" type="button" ${saving ? "disabled" : ""}>取消</sakuga-button>
+            <sakuga-button id="modal-confirm-btn" type="button" ${saving ? "disabled" : ""}>${saving ? "保存中..." : "保存"}</sakuga-button>
           </div>
         </div>
       </div>
@@ -1709,18 +1717,18 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
       <div class="${modalOverlayClass()}" role="dialog" aria-modal="true">
         <div class="modal-card">
           <div class="modal-title">${title}</div>
-          <input id="modal-alias-input" class="modal-input" maxlength="60" placeholder="${aliasPlaceholder}" aria-label="备注名称" value="${escapeHtml(modal.draft)}" ${saving ? "disabled" : ""} />
+          <sakuga-input id="modal-alias-input" label="备注名称" placeholder="${aliasPlaceholder}" value="${escapeHtml(modal.draft)}" ${saving ? "disabled" : ""}></sakuga-input>
           ${supportsProxy ? `
             <label class="modal-desc" for="modal-proxy-input">HTTP CONNECT 代理（留空使用系统网络）</label>
             <div class="proxy-input-row">
-              <input id="modal-proxy-input" class="modal-input" maxlength="512" placeholder="http://127.0.0.1:7890" value="${escapeHtml(modal.proxyDraft)}" autocomplete="off" spellcheck="false" ${saving ? "disabled" : ""} />
+              <sakuga-input id="modal-proxy-input" label="代理地址" placeholder="http://127.0.0.1:7890" value="${escapeHtml(modal.proxyDraft)}" autocomplete="off" ${saving ? "disabled" : ""}></sakuga-input>
               ${!isMobilePlatform(platform) ? `<button id="proxy-test-btn" class="btn mini-test-btn" type="button" ${saving || proxyTesting ? "disabled" : ""}>${proxyTesting ? "测速中..." : "测试连接"}</button>` : ""}
             </div>
             ${testRes ? `<div id="proxy-test-result" class="proxy-test-box ${testRes.ok ? "ok" : "err"}">${escapeHtml(testRes.message)}</div>` : ""}
             <div class="modal-hint">仅作用于内嵌页面；外部浏览器登录与更新检查不走此代理。</div>
           ` : ""}
           <label class="modal-desc" for="modal-timezone-input">自定义时区（留空跟随系统）</label>
-          <input id="modal-timezone-input" class="modal-input" maxlength="64" placeholder="IANA 时区（例如 America/New_York、Asia/Tokyo）" value="${escapeHtml(modal.timezoneDraft)}" autocomplete="off" spellcheck="false" ${saving ? "disabled" : ""} />
+          <sakuga-input id="modal-timezone-input" label="自定义时区" placeholder="IANA 时区（例如 America/New_York、Asia/Tokyo）" value="${escapeHtml(modal.timezoneDraft)}" autocomplete="off" ${saving ? "disabled" : ""}></sakuga-input>
           <div class="preset-chips">
             ${TIMEZONE_PRESETS.map(
               (p) =>
@@ -1743,9 +1751,9 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
           </div>
           ${modal.error ? `<div id="modal-error-box" class="update-error-box" role="alert">${escapeHtml(modal.error)}</div>` : ""}
           <div class="modal-footer">
-            ${!creating ? `<button id="modal-clear-data-btn" class="btn danger-outline left-action" type="button" ${saving ? "disabled" : ""}>${modal.confirmClear ? "确认清空？" : "清空登录缓存"}</button>` : ""}
-            <button id="modal-cancel-btn" class="btn" type="button" ${saving ? "disabled" : ""}>取消</button>
-            <button id="modal-confirm-btn" class="btn primary" type="button" ${saving ? "disabled" : ""}>${saving ? (creating ? "创建中..." : "保存中...") : (creating ? "创建并打开" : "保存")}</button>
+            ${!creating ? `<sakuga-button id="modal-clear-data-btn" class="danger-btn left-action" variant="secondary" type="button" ${saving ? "disabled" : ""}>${modal.confirmClear ? "确认清空？" : "清空登录缓存"}</sakuga-button>` : ""}
+            <sakuga-button id="modal-cancel-btn" variant="secondary" type="button" ${saving ? "disabled" : ""}>取消</sakuga-button>
+            <sakuga-button id="modal-confirm-btn" type="button" ${saving ? "disabled" : ""}>${saving ? (creating ? "创建中..." : "保存中...") : (creating ? "创建并打开" : "保存")}</sakuga-button>
           </div>
         </div>
       </div>
@@ -1868,7 +1876,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
       <div class="${modalOverlayClass()}" role="dialog" aria-modal="true">
         <div class="modal-card group-modal-card">
           <div class="modal-title">${editing ? `编辑「${escapeHtml(gModal.group!.name)}」` : "创建群聊"}</div>
-          <input id="modal-group-name-input" class="modal-input" maxlength="32" placeholder="群聊名称（如：产品头脑风暴）" aria-label="群聊名称" value="${escapeHtml(gModal.nameDraft)}" ${saving ? "disabled" : ""} />
+          <sakuga-input id="modal-group-name-input" label="群聊名称" placeholder="群聊名称（如：产品头脑风暴）" value="${escapeHtml(gModal.nameDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
           <div class="group-picker-head-row">
             <div class="modal-desc">选择参与群聊的网页账号或 API / CLI 成员</div>
             <button id="open-external-agents-from-group-btn" class="mini-btn primary-text" type="button" ${saving ? "disabled" : ""}>+ 管理 API/CLI</button>
@@ -1879,8 +1887,8 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
           <div id="modal-group-hint" class="modal-hint">${escapeHtml(hintText)}</div>
           ${gModal.error ? `<div id="modal-error-box" class="update-error-box" role="alert">${escapeHtml(gModal.error)}</div>` : ""}
           <div class="modal-footer">
-            <button id="modal-cancel-btn" class="btn" type="button" ${saving ? "disabled" : ""}>取消</button>
-            <button id="modal-confirm-btn" class="btn primary" type="button" ${saving || gModal.selectedMembers.length === 0 ? "disabled" : ""}>${saving ? (editing ? "保存中..." : "创建中...") : (editing ? "保存" : "创建群聊")}</button>
+            <sakuga-button id="modal-cancel-btn" variant="secondary" type="button" ${saving ? "disabled" : ""}>取消</sakuga-button>
+            <sakuga-button id="modal-confirm-btn" type="button" ${saving || gModal.selectedMembers.length === 0 ? "disabled" : ""}>${saving ? (editing ? "保存中..." : "创建中...") : (editing ? "保存" : "创建群聊")}</sakuga-button>
           </div>
         </div>
       </div>
@@ -1920,10 +1928,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
                 (s) => `
               <div class="skill-card ${s.enabled ? "" : "disabled"}">
                 <div class="skill-card-head">
-                  <label class="skill-toggle-label">
-                    <input type="checkbox" data-toggle-skill-id="${escapeHtml(s.id)}" ${s.enabled ? "checked" : ""} ${saving ? "disabled" : ""} />
-                    <span class="skill-card-name">${escapeHtml(s.name)}</span>
-                  </label>
+                  <sakuga-checkbox data-toggle-skill-id="${escapeHtml(s.id)}" ${s.enabled ? "checked" : ""} ${saving ? "disabled" : ""}><span class="skill-card-name">${escapeHtml(s.name)}</span></sakuga-checkbox>
                   <div class="skill-card-ops">
                     <button class="mini-btn" data-edit-skill-id="${escapeHtml(s.id)}" type="button" ${saving ? "disabled" : ""}>编辑</button>
                     <button class="mini-btn danger-text" data-delete-skill-id="${escapeHtml(s.id)}" type="button" ${saving ? "disabled" : ""}>删除</button>
@@ -1943,8 +1948,8 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
         <div class="skills-list">${skillsHtml}</div>
         <div class="skill-editor-box">
           <div class="skill-editor-title">${kModal.editingSkillId ? "编辑共享技能" : "添加自定义技能"}</div>
-          <input id="modal-skill-name-input" class="modal-input" maxlength="48" placeholder="技能名称（如：代码审查规范）" value="${escapeHtml(kModal.skillNameDraft)}" ${saving ? "disabled" : ""} />
-          <input id="modal-skill-desc-input" class="modal-input" maxlength="120" placeholder="简短说明（选填）" value="${escapeHtml(kModal.skillDescDraft)}" ${saving ? "disabled" : ""} />
+          <sakuga-input id="modal-skill-name-input" label="技能名称" placeholder="技能名称（如：代码审查规范）" value="${escapeHtml(kModal.skillNameDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
+          <sakuga-input id="modal-skill-desc-input" label="技能说明" placeholder="简短说明（选填）" value="${escapeHtml(kModal.skillDescDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
           <textarea id="modal-skill-content-input" class="modal-textarea" rows="3" maxlength="2000" placeholder="输入注入给各 AI 成员的技能指令原文…" ${saving ? "disabled" : ""}>${escapeHtml(kModal.skillContentDraft)}</textarea>
           <div class="skill-editor-actions">
             ${kModal.editingSkillId ? `<button id="modal-skill-cancel-edit-btn" class="mini-btn" type="button" ${saving ? "disabled" : ""}>取消编辑</button>` : ""}
@@ -1988,15 +1993,15 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
                 <span class="role-member-name">${escapeHtml(meta.alias)}</span>
                 <span class="group-provider-tag">${escapeHtml(meta.providerShort)}</span>
               </div>
-              <input
-                class="modal-input role-input"
-                maxlength="120"
+              <sakuga-input
+                class="role-input"
+                label="成员分工"
                 data-role-provider="${escapeHtml(m.providerId)}"
                 data-role-uuid="${escapeHtml(m.uuid)}"
                 placeholder="成员分工（如：前端性能优化与交互评审）"
                 value="${escapeHtml(curRole)}"
                 ${saving ? "disabled" : ""}
-              />
+              ></sakuga-input>
               ${bindingHtml}
             </div>
           `;
@@ -2041,17 +2046,17 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
       <div class="${modalOverlayClass()}" role="dialog" aria-modal="true">
         <div class="modal-card group-knowledge-modal-card">
           <div class="modal-title">共享上下文 & 技能 · ${escapeHtml(latestGroup.name)}</div>
-          <div class="knowledge-tabs">
-            <button class="knowledge-tab ${kModal.tab === "context" ? "active" : ""}" data-knowledge-tab="context" type="button" ${saving ? "disabled" : ""}>共享上下文</button>
-            <button class="knowledge-tab ${kModal.tab === "skills" ? "active" : ""}" data-knowledge-tab="skills" type="button" ${saving ? "disabled" : ""}>共享技能 (${enabledCount})</button>
-            <button class="knowledge-tab ${kModal.tab === "roles" ? "active" : ""}" data-knowledge-tab="roles" type="button" ${saving ? "disabled" : ""}>分工 &amp; 会话</button>
-            <button class="knowledge-tab ${kModal.tab === "adapters" ? "active" : ""}" data-knowledge-tab="adapters" type="button" ${saving ? "disabled" : ""}>站点规则${kModal.adaptersSnap?.hasOverrides ? " *" : ""}</button>
-          </div>
+          <sakuga-tabs id="knowledge-tabs" label="群聊设置" selected="${kModal.tab === "context" ? 0 : kModal.tab === "skills" ? 1 : kModal.tab === "roles" ? 2 : 3}">
+            <option value="context">共享上下文</option>
+            <option value="skills">共享技能 (${enabledCount})</option>
+            <option value="roles">分工 &amp; 会话</option>
+            <option value="adapters">站点规则${kModal.adaptersSnap?.hasOverrides ? " *" : ""}</option>
+          </sakuga-tabs>
           ${tabBody}
           ${kModal.error ? `<div id="modal-error-box" class="update-error-box" role="alert">${escapeHtml(kModal.error)}</div>` : ""}
           <div class="modal-footer">
-            <button id="modal-cancel-btn" class="btn" type="button" ${saving ? "disabled" : ""}>取消</button>
-            <button id="modal-confirm-btn" class="btn primary" type="button" ${saving ? "disabled" : ""}>${confirmLabel}</button>
+            <sakuga-button id="modal-cancel-btn" variant="secondary" type="button" ${saving ? "disabled" : ""}>取消</sakuga-button>
+            <sakuga-button id="modal-confirm-btn" type="button" ${saving ? "disabled" : ""}>${confirmLabel}</sakuga-button>
           </div>
         </div>
       </div>
@@ -2095,14 +2100,14 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
     const fieldsHtml =
       eModal.formKind === "openai_api"
         ? `
-          <input id="ext-agent-url-input" class="modal-input" maxlength="260" placeholder="Base URL（例如 https://api.deepseek.com/v1 或 http://127.0.0.1:11434/v1）" value="${escapeHtml(eModal.baseUrlDraft)}" ${saving ? "disabled" : ""} />
-          <input id="ext-agent-key-input" class="modal-input" maxlength="512" type="password" placeholder="API Key（本机 Ollama 可留空）" value="${escapeHtml(eModal.apiKeyDraft)}" ${saving ? "disabled" : ""} />
-          <input id="ext-agent-model-input" class="modal-input" maxlength="120" placeholder="模型名称（例如 gpt-4o / deepseek-chat / qwen2.5:14b）" value="${escapeHtml(eModal.modelDraft)}" ${saving ? "disabled" : ""} />
+          <sakuga-input id="ext-agent-url-input" label="Base URL" placeholder="Base URL（例如 https://api.deepseek.com/v1 或 http://127.0.0.1:11434/v1）" value="${escapeHtml(eModal.baseUrlDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
+          <sakuga-input id="ext-agent-key-input" label="API Key" type="password" placeholder="API Key（本机 Ollama 可留空）" value="${escapeHtml(eModal.apiKeyDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
+          <sakuga-input id="ext-agent-model-input" label="模型名称" placeholder="模型名称（例如 gpt-4o / deepseek-chat / qwen2.5:14b）" value="${escapeHtml(eModal.modelDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
         `
         : `
-          <input id="ext-agent-cmd-input" class="modal-input" maxlength="260" placeholder="CLI 命令（例如 claude / codex / gemini）" value="${escapeHtml(eModal.commandDraft)}" ${saving ? "disabled" : ""} />
-          <input id="ext-agent-args-input" class="modal-input" maxlength="400" placeholder="命令参数，空格分隔（例如 -p 或 exec {prompt}；无 {prompt} 时走 stdin）" value="${escapeHtml(eModal.argsDraft)}" ${saving ? "disabled" : ""} />
-          <input id="ext-agent-workdir-input" class="modal-input" maxlength="260" placeholder="工作目录（选填，例如 /Users/name/project）" value="${escapeHtml(eModal.workdirDraft)}" ${saving ? "disabled" : ""} />
+          <sakuga-input id="ext-agent-cmd-input" label="CLI 命令" placeholder="CLI 命令（例如 claude / codex / gemini）" value="${escapeHtml(eModal.commandDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
+          <sakuga-input id="ext-agent-args-input" label="命令参数" placeholder="命令参数，空格分隔（例如 -p 或 exec {prompt}；无 {prompt} 时走 stdin）" value="${escapeHtml(eModal.argsDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
+          <sakuga-input id="ext-agent-workdir-input" label="工作目录" placeholder="工作目录（选填，例如 /Users/name/project）" value="${escapeHtml(eModal.workdirDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
         `;
 
     return `
@@ -2123,7 +2128,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
                 <button class="mini-btn ${eModal.formKind === "local_cli" ? "primary-text" : ""}" data-ext-kind="local_cli" type="button" ${saving ? "disabled" : ""}>本地 CLI</button>
               </div>
             </div>
-            <input id="ext-agent-name-input" class="modal-input" maxlength="40" placeholder="群聊显示名称（如：Claude-Code / DeepSeek）" value="${escapeHtml(eModal.nameDraft)}" ${saving ? "disabled" : ""} />
+            <sakuga-input id="ext-agent-name-input" label="显示名称" placeholder="群聊显示名称（如：Claude-Code / DeepSeek）" value="${escapeHtml(eModal.nameDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
             ${fieldsHtml}
             <div class="skill-editor-actions">
               ${eModal.editingId ? `<button id="ext-agent-cancel-edit-btn" class="mini-btn" type="button" ${saving ? "disabled" : ""}>取消编辑</button>` : ""}
@@ -2132,7 +2137,7 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
           </div>
           ${eModal.error ? `<div id="modal-error-box" class="update-error-box" role="alert">${escapeHtml(eModal.error)}</div>` : ""}
           <div class="modal-footer">
-            <button id="modal-cancel-btn" class="btn primary" type="button" ${saving ? "disabled" : ""}>完成</button>
+            <sakuga-button id="modal-cancel-btn" type="button" ${saving ? "disabled" : ""}>完成</sakuga-button>
           </div>
         </div>
       </div>
@@ -2145,8 +2150,8 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
           <div class="modal-title">删除群聊「${escapeHtml(modal.group.name)}」</div>
           <div class="modal-desc">将删除该群聊及本地群聊记录。各成员账号与原生网页历史不受影响。</div>
           <div class="modal-footer">
-            <button id="modal-cancel-btn" class="btn" type="button">取消</button>
-            <button id="modal-confirm-btn" class="btn danger" type="button">确认删除</button>
+            <sakuga-button id="modal-cancel-btn" variant="secondary" type="button">取消</sakuga-button>
+            <sakuga-button id="modal-confirm-btn" class="danger-btn" variant="secondary" type="button">确认删除</sakuga-button>
           </div>
         </div>
       </div>
@@ -2158,8 +2163,8 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
         <div class="modal-title">移除「${escapeHtml(modal.account.alias)}」</div>
         <div class="modal-desc">将关闭该视图并彻底清除本机独立浏览资料（Cookie 与存储）。云端账号及历史对话仍由官方保留。</div>
         <div class="modal-footer">
-          <button id="modal-cancel-btn" class="btn" type="button">取消</button>
-          <button id="modal-confirm-btn" class="btn danger" type="button">确认移除</button>
+          <sakuga-button id="modal-cancel-btn" variant="secondary" type="button">取消</sakuga-button>
+          <sakuga-button id="modal-confirm-btn" class="danger-btn" variant="secondary" type="button">确认移除</sakuga-button>
         </div>
       </div>
     </div>
@@ -2484,7 +2489,7 @@ function renderRightStage(state: ManagerSnapshot, provider: ProviderInfo): strin
           <div class="stage-logo-tile">${renderProviderLogo(provider)}</div>
           <div class="placeholder-title">${escapeHtml(provider.name)} · 待接入</div>
           <div class="placeholder-desc">首版暂未启用应用内嵌会话。访问官网不会覆盖上次已打开的账号记录。</div>
-          <button id="stage-open-site-btn" class="btn primary" type="button">打开 ${escapeHtml(provider.shortName)} 官网</button>
+          <sakuga-button id="stage-open-site-btn" type="button">打开 ${escapeHtml(provider.shortName)} 官网</sakuga-button>
         </div>
       </main>
     `;
@@ -2496,7 +2501,7 @@ function renderRightStage(state: ManagerSnapshot, provider: ProviderInfo): strin
         <div class="stage-logo-tile">${renderProviderLogo(provider)}</div>
         <div class="placeholder-title">${escapeHtml(provider.name)}</div>
         <div class="placeholder-desc">从左侧选择一个账号进入对话，或新建账号开启独立隔离登录。</div>
-        <button id="stage-add-btn" class="btn primary" type="button">+ 新增 ${escapeHtml(provider.shortName)} 账号</button>
+        <sakuga-button id="stage-add-btn" type="button">+ 新增 ${escapeHtml(provider.shortName)} 账号</sakuga-button>
       </div>
     </main>
   `;
@@ -2874,7 +2879,7 @@ function renderGroupRightStage(state: ManagerSnapshot): string {
           <div class="placeholder-title">创建你的跨服务 AI 群聊</div>
           <div class="placeholder-desc">支持 Muse / Hark / Cue 网页账号与 OpenAI API / 本地 CLI 混编入群，内置并行、评审流、A2A 接力与独立会话绑定。</div>
           <div class="stage-card-actions">
-            <button id="stage-create-group-btn" class="btn primary" type="button">+ 创建群聊</button>
+            <sakuga-button id="stage-create-group-btn" type="button">+ 创建群聊</sakuga-button>
           </div>
         </div>
       </main>
@@ -3273,6 +3278,11 @@ function render(): void {
     "ext-agent-workdir-input",
     "group-chat-input",
   ]);
+  // Sakuga 输入框的 inner input 藏在 shadow DOM 里（open 模式可读），光标位置从那里取。
+  const focusedSakugaInner =
+    focusedInput?.tagName === "SAKUGA-INPUT"
+      ? (focusedInput as unknown as { shadowRoot?: ShadowRoot | null }).shadowRoot?.querySelector("input") ?? null
+      : null;
   const accountInputSelection =
     (focusedInput instanceof HTMLInputElement || focusedInput instanceof HTMLTextAreaElement) &&
     preservedInputIds.has(focusedInput.id)
@@ -3282,7 +3292,14 @@ function render(): void {
           end: focusedInput.selectionEnd,
           direction: focusedInput.selectionDirection,
         }
-      : null;
+      : focusedSakugaInner && focusedInput && preservedInputIds.has(focusedInput.id)
+        ? {
+            id: focusedInput.id,
+            start: focusedSakugaInner.selectionStart,
+            end: focusedSakugaInner.selectionEnd,
+            direction: focusedSakugaInner.selectionDirection,
+          }
+        : null;
 
   const provider = currentProvider(snapshot);
   const isMobile = isMobilePlatform(snapshot.platform);
@@ -3293,16 +3310,11 @@ function render(): void {
     root.innerHTML = `
       <div class="mobile-shell">
         <div class="mobile-tabs">
-          ${snapshot.providers
-            .map(
-              (p) => `
-              <button class="mobile-tab ${p.id === provider.id ? "active" : ""}" data-provider="${escapeHtml(p.id)}" type="button">
-                ${renderProviderLogo(p, "mobile-tab-logo")}
-                <span>${escapeHtml(p.shortName)}</span>
-              </button>
-            `
-            )
-            .join("")}
+          <sakuga-tabs id="provider-tabs" label="服务商" selected="${snapshot.providers.findIndex((p) => p.id === provider.id)}">
+            ${snapshot.providers
+              .map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.shortName)}</option>`)
+              .join("")}
+          </sakuga-tabs>
         </div>
         <div class="middle-column" style="width:100%;min-width:0;flex:1;border-right:none;">
           ${renderMiddleContent(snapshot, provider)}
@@ -3386,15 +3398,23 @@ function render(): void {
 
   bindEvents(snapshot, provider);
   if (accountInputSelection) {
-    const input = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
-      `#${accountInputSelection.id}`
-    );
-    input?.focus({ preventScroll: true });
-    input?.setSelectionRange(
-      accountInputSelection.start,
-      accountInputSelection.end,
-      accountInputSelection.direction ?? undefined
-    );
+    const el = document.querySelector<HTMLElement>(`#${accountInputSelection.id}`);
+    if (el?.tagName === "SAKUGA-INPUT") {
+      el.focus({ preventScroll: true });
+      const inner = (el as unknown as { shadowRoot?: ShadowRoot | null }).shadowRoot?.querySelector("input");
+      inner?.setSelectionRange(
+        accountInputSelection.start,
+        accountInputSelection.end,
+        accountInputSelection.direction ?? undefined
+      );
+    } else if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      el.focus({ preventScroll: true });
+      el.setSelectionRange(
+        accountInputSelection.start,
+        accountInputSelection.end,
+        accountInputSelection.direction ?? undefined
+      );
+    }
   }
   shouldAnimateModal = false;
 }
@@ -3410,16 +3430,25 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
     await callCommand("select_group_chat", { groupId: targetId });
   });
 
+  const switchProvider = async (nextId: ProviderId): Promise<void> => {
+    if (!nextId || (viewMode === "provider" && nextId === state.selectedProviderId)) return;
+    if (modal.kind !== "none") {
+      await setModal({ kind: "none" });
+    }
+    viewMode = "provider";
+    await callCommand("select_provider", { providerId: nextId });
+  };
+
   document.querySelectorAll<HTMLElement>("[data-provider]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const nextId = btn.dataset.provider as ProviderId;
-      if (!nextId || (viewMode === "provider" && nextId === state.selectedProviderId)) return;
-      if (modal.kind !== "none") {
-        await setModal({ kind: "none" });
-      }
-      viewMode = "provider";
-      await callCommand("select_provider", { providerId: nextId });
+    btn.addEventListener("click", () => {
+      void switchProvider(btn.dataset.provider as ProviderId);
     });
+  });
+
+  // 移动端顶栏：Sakuga Tabs，点选后走同一套切服务商逻辑。
+  document.querySelector("#provider-tabs")?.addEventListener("change", (ev) => {
+    const nextId = (ev as CustomEvent<{ index: number; value: string; label: string }>).detail.value as ProviderId;
+    void switchProvider(nextId);
   });
 
   const handleOpenCreateGroup = async () => {
@@ -4136,17 +4165,23 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
     modal.error = undefined;
   });
 
-  document.querySelector("#sync-tab-lan")?.addEventListener("click", () => {
+  // 同步方式切换：Sakuga Tabs；忙时不切（原来按钮是 disabled 的）。
+  document.querySelector("#sync-tabs")?.addEventListener("change", (ev) => {
     if (modal.kind !== "sync") return;
-    modal.tab = "lan";
-    modal.error = undefined;
-    modal.copyHint = undefined;
-    render();
-  });
-
-  document.querySelector("#sync-tab-file")?.addEventListener("click", () => {
-    if (modal.kind !== "sync") return;
-    modal.tab = "file";
+    if (
+      modal.lanShareBusy ||
+      modal.lanPullBusy ||
+      modal.lanScanBusy ||
+      modal.fileExportBusy ||
+      modal.fileImportBusy
+    ) {
+      return;
+    }
+    const nextTab = (ev as CustomEvent<{ index: number; value: string; label: string }>).detail.value as
+      | "lan"
+      | "file";
+    if (modal.tab === nextTab) return;
+    modal.tab = nextTab;
     modal.error = undefined;
     modal.copyHint = undefined;
     render();
@@ -5059,39 +5094,38 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
     return true;
   };
 
-  document.querySelectorAll<HTMLButtonElement>("[data-knowledge-tab]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      if (modal.kind !== "group-knowledge" || modal.saving) return;
-      const nextTab = btn.dataset.knowledgeTab as
-        | "context"
-        | "skills"
-        | "roles"
-        | "adapters"
-        | undefined;
-      if (nextTab && modal.tab !== nextTab) {
-        modal.tab = nextTab;
-        modal.error = undefined;
-        render();
-        if (nextTab === "adapters" && !modal.adaptersLoaded) {
-          const currentModal = modal;
-          try {
-            const snap = await invoke<SiteAdaptersSnapshot>("get_site_adapters");
-            if (modal === currentModal) {
-              currentModal.adaptersSnap = snap;
-              currentModal.adaptersJsonDraft = snap.overrideJson ?? "";
-              currentModal.adaptersLoaded = true;
-              render();
-            }
-          } catch (err) {
-            if (modal === currentModal) {
-              currentModal.error = String(err);
-              currentModal.adaptersLoaded = true;
-              render();
-            }
+  // 群聊设置 Tab：Sakuga Tabs；切换后逻辑不变（含站点规则的懒加载）。
+  document.querySelector("#knowledge-tabs")?.addEventListener("change", async (ev) => {
+    if (modal.kind !== "group-knowledge" || modal.saving) return;
+    const nextTab = (ev as CustomEvent<{ index: number; value: string; label: string }>).detail.value as
+      | "context"
+      | "skills"
+      | "roles"
+      | "adapters"
+      | undefined;
+    if (nextTab && modal.tab !== nextTab) {
+      modal.tab = nextTab;
+      modal.error = undefined;
+      render();
+      if (nextTab === "adapters" && !modal.adaptersLoaded) {
+        const currentModal = modal;
+        try {
+          const snap = await invoke<SiteAdaptersSnapshot>("get_site_adapters");
+          if (modal === currentModal) {
+            currentModal.adaptersSnap = snap;
+            currentModal.adaptersJsonDraft = snap.overrideJson ?? "";
+            currentModal.adaptersLoaded = true;
+            render();
+          }
+        } catch (err) {
+          if (modal === currentModal) {
+            currentModal.error = String(err);
+            currentModal.adaptersLoaded = true;
+            render();
           }
         }
       }
-    });
+    }
   });
 
   const contextInputEl = document.querySelector<HTMLTextAreaElement>("#modal-group-context-input");
@@ -5673,6 +5707,16 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
       });
     }
   });
+
+  // 更新进度条（sakuga-progress）：每次重渲染后按当前百分比一次定位，不用缓动重播。
+  const updateProgressEl = document.querySelector<HTMLElement>("#update-progress-bar");
+  const updatePct = updateState.progress?.percent;
+  if (updateProgressEl?.tagName === "SAKUGA-PROGRESS" && typeof updatePct === "number") {
+    (updateProgressEl as unknown as { set(v: number, instant?: boolean): void }).set(
+      Math.max(0, Math.min(100, updatePct)) / 100,
+      true
+    );
+  }
 }
 
 function groupModalVisualSignature(s: ManagerSnapshot): string {
@@ -5761,7 +5805,13 @@ async function bootstrap(): Promise<void> {
     if (barEl && textEl && pctEl && lastRenderedUpdateStage === evt.stage && evt.stage !== "error") {
       textEl.textContent = evt.message;
       pctEl.textContent = formatProgressSummary(evt);
-      if (evt.percent === null) {
+      if (barEl.tagName === "SAKUGA-PROGRESS") {
+        // Sakuga 进度条：直接定位，不用缓动重播。
+        (barEl as unknown as { set(v: number, instant?: boolean): void }).set(
+          evt.percent === null ? 0 : Math.max(0, Math.min(100, evt.percent)) / 100,
+          true
+        );
+      } else if (evt.percent === null) {
         barEl.classList.add("indeterminate");
         barEl.style.width = "";
       } else {
