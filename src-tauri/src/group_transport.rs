@@ -2,7 +2,6 @@ use crate::storage::{now_ms, normalize_uuid, AccountKey, ExternalAgentKind, Exte
 use url::Url;
 use uuid::Uuid;
 
-#[cfg(desktop)]
 use serde_json::Value;
 #[cfg(desktop)]
 use std::io::{Read, Write};
@@ -128,45 +127,39 @@ pub fn build_openai_endpoint(base_url: &str) -> String {
 
 #[cfg_attr(not(desktop), allow(dead_code))]
 pub fn extract_openai_sse_delta(line: &str) -> Option<String> {
-  #[cfg(desktop)]
-  {
-    let trimmed = line.trim();
-    let payload = trimmed.strip_prefix("data:")?.trim();
-    if payload.is_empty() || payload == "[DONE]" {
-      return None;
-    }
-    let parsed: Value = serde_json::from_str(payload).ok()?;
-    let choice = parsed.get("choices")?.get(0)?;
-    if let Some(text) = choice
-      .get("delta")
-      .and_then(|d| d.get("content"))
-      .and_then(|v| v.as_str())
-    {
-      if !text.is_empty() {
-        return Some(text.to_string());
-      }
-    }
-    if let Some(text) = choice
-      .get("message")
-      .and_then(|m| m.get("content"))
-      .and_then(|v| v.as_str())
-    {
-      if !text.is_empty() {
-        return Some(text.to_string());
-      }
-    }
-    if let Some(text) = choice.get("text").and_then(|v| v.as_str()) {
-      if !text.is_empty() {
-        return Some(text.to_string());
-      }
-    }
-    None
+  // 纯 serde_json 解析，全平台可用（execute_openai_api_turn 本身仍限桌面端，
+  // 见其上方的注释：reqwest 只在桌面端目标的依赖里）。
+  let trimmed = line.trim();
+  let payload = trimmed.strip_prefix("data:")?.trim();
+  if payload.is_empty() || payload == "[DONE]" {
+    return None;
   }
-  #[cfg(not(desktop))]
+  let parsed: Value = serde_json::from_str(payload).ok()?;
+  let choice = parsed.get("choices")?.get(0)?;
+  if let Some(text) = choice
+    .get("delta")
+    .and_then(|d| d.get("content"))
+    .and_then(|v| v.as_str())
   {
-    let _ = line;
-    None
+    if !text.is_empty() {
+      return Some(text.to_string());
+    }
   }
+  if let Some(text) = choice
+    .get("message")
+    .and_then(|m| m.get("content"))
+    .and_then(|v| v.as_str())
+  {
+    if !text.is_empty() {
+      return Some(text.to_string());
+    }
+  }
+  if let Some(text) = choice.get("text").and_then(|v| v.as_str()) {
+    if !text.is_empty() {
+      return Some(text.to_string());
+    }
+  }
+  None
 }
 
 #[cfg_attr(not(desktop), allow(dead_code))]
@@ -183,6 +176,10 @@ pub fn build_cli_args_and_stdin(args: &[String], prompt: &str) -> (Vec<String>, 
   }
 }
 
+// 注意：本函数保持桌面端限定——它用的 reqwest 只在 Cargo.toml 的
+// [target.'cfg(not(any(target_os = "android", target_os = "ios")))']
+// 依赖里，移动端目标上没有该 crate；放行它必须改 Cargo.toml（不在本次任务内）。
+// 移动端分派处（execute_external_member_turn）对 OpenAI API 成员返回明确错误。
 #[cfg(desktop)]
 pub async fn execute_openai_api_turn<F>(
   agent: &ExternalAgentRecord,

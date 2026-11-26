@@ -69,6 +69,12 @@ object AccountSessionCoordinator {
         }
     }
 
+    fun currentActivity(): AccountWebActivity? {
+        synchronized(lock) {
+            return activityRef?.get()
+        }
+    }
+
     fun recoverSpecOnActivityRecreate(): AndroidAccountSessionSpec? {
         synchronized(lock) {
             if (!pluginInitialized) {

@@ -7,6 +7,8 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.PersistableBundle
 import android.provider.Settings
 import androidx.core.content.FileProvider
@@ -27,6 +29,7 @@ import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 @InvokeArg
@@ -113,6 +116,12 @@ class DownloadApkArgs {
     var sha256: String? = null
     var filename: String = ""
     var userAgent: String = ""
+}
+
+@InvokeArg
+class EvaluateJavascriptArgs {
+    var uuid: String = ""
+    var script: String = ""
 }
 
 @TauriPlugin
@@ -776,6 +785,67 @@ class AccountSessionPlugin(private val activity: Activity) : Plugin(activity) {
                 activity.startActivity(intent)
             } catch (t: Throwable) {
                 invoke.reject(t.message ?: "无法打开扫码界面")
+            }
+        }
+    }
+
+    @Command
+    fun evaluateJavascript(invoke: Invoke) {
+        val args = invoke.parseArgs(EvaluateJavascriptArgs::class.java)
+        activity.runOnUiThread {
+            val settled = AtomicBoolean(false)
+            val timeoutHandler = Handler(Looper.getMainLooper())
+            val timeoutRunnable = Runnable {
+                if (settled.compareAndSet(false, true)) {
+                    invoke.reject("执行 JS 超时（30 秒），页面可能未响应")
+                }
+            }
+            timeoutHandler.postDelayed(timeoutRunnable, 30_000L)
+
+            fun settleSuccess(raw: String) {
+                if (!settled.compareAndSet(false, true)) return
+                timeoutHandler.removeCallbacks(timeoutRunnable)
+                invoke.resolveObject(raw)
+            }
+
+            fun settleError(message: String) {
+                if (!settled.compareAndSet(false, true)) return
+                timeoutHandler.removeCallbacks(timeoutRunnable)
+                invoke.reject(message)
+            }
+
+            try {
+                if (!AccountSessionCoordinator.isUuidActive(args.uuid)) {
+                    settleError("该账号的会话未打开或已切换，请先打开该账号")
+                    return@runOnUiThread
+                }
+                val target = AccountSessionCoordinator.currentActivity()
+                if (target == null) {
+                    settleError("账号页面不可用，请先打开该账号")
+                    return@runOnUiThread
+                }
+                val dispatched = target.evaluateJavascriptOnMainWebView(args.script) { raw ->
+                    activity.runOnUiThread {
+                        try {
+                            if (raw == null) {
+                                settleError("JS 执行未返回结果（脚本错误或页面已销毁）")
+                                return@runOnUiThread
+                            }
+                            if (!AccountSessionCoordinator.isUuidActive(args.uuid)) {
+                                settleError("账号会话已切换")
+                                return@runOnUiThread
+                            }
+                            settleSuccess(raw)
+                        } catch (t: Throwable) {
+                            settleError(t.message ?: "执行 JS 回调异常")
+                        }
+                    }
+                }
+                if (!dispatched) {
+                    settleError("账号页面 WebView 不可用，请先打开该账号")
+                }
+            } catch (t: Throwable) {
+                settleError(t.message ?: "执行 JS 异常")
             }
         }
     }

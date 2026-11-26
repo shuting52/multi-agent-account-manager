@@ -380,7 +380,11 @@ function isMobilePlatform(platform: ManagerSnapshot["platform"] | undefined): bo
 function syncViewModeFromSnapshot(state: ManagerSnapshot | null): void {
   if (!state) return;
   if (isMobilePlatform(state.platform)) {
-    viewMode = "provider";
+    // 移动端：用户已在顶栏选了群聊就一直留在群聊视图，快照推送
+    //（选群/发消息/同步回包）不得把它打回服务商视图；其余情况仍是服务商视图。
+    if (viewMode !== "groups") {
+      viewMode = "provider";
+    }
     return;
   }
   if (state.activeGroupId) {
@@ -2066,9 +2070,11 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
     const eModal = modal;
     const saving = Boolean(eModal.saving);
     const agents = state.externalAgents ?? [];
-    const presetsHtml = EXTERNAL_AGENT_PRESETS.map(
-      (p, idx) =>
-        `<button class="skill-preset-chip" data-ext-preset-idx="${idx}" type="button" ${saving ? "disabled" : ""}>+ ${escapeHtml(p.label)}</button>`
+    const presetsHtml = EXTERNAL_AGENT_PRESETS.map((p, idx) =>
+      // 移动端不提供本地 CLI 预设：安卓没有 shell，跑不了本地命令行。
+      isMobilePlatform(platform) && p.kind === "local_cli"
+        ? ""
+        : `<button class="skill-preset-chip" data-ext-preset-idx="${idx}" type="button" ${saving ? "disabled" : ""}>+ ${escapeHtml(p.label)}</button>`
     ).join("");
     const listHtml =
       agents.length === 0
@@ -2125,9 +2131,10 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
               <span class="skill-editor-title">${eModal.editingId ? "编辑成员" : "新增直连成员"}</span>
               <div class="ext-kind-switch">
                 <button class="mini-btn ${eModal.formKind === "openai_api" ? "primary-text" : ""}" data-ext-kind="openai_api" type="button" ${saving ? "disabled" : ""}>OpenAI API</button>
-                <button class="mini-btn ${eModal.formKind === "local_cli" ? "primary-text" : ""}" data-ext-kind="local_cli" type="button" ${saving ? "disabled" : ""}>本地 CLI</button>
+                ${isMobilePlatform(platform) ? "" : `<button class="mini-btn ${eModal.formKind === "local_cli" ? "primary-text" : ""}" data-ext-kind="local_cli" type="button" ${saving ? "disabled" : ""}>本地 CLI</button>`}
               </div>
             </div>
+            ${isMobilePlatform(platform) ? `<div class="modal-desc" style="margin-top:6px;">本地 CLI 仅桌面端可用：安卓没有 shell，跑不了本地命令行。</div>` : ""}
             <sakuga-input id="ext-agent-name-input" maxlength="40" label="显示名称" placeholder="群聊显示名称（如：Claude-Code / DeepSeek）" value="${escapeHtml(eModal.nameDraft)}" ${saving ? "disabled" : ""}></sakuga-input>
             ${fieldsHtml}
             <div class="skill-editor-actions">
@@ -3303,22 +3310,27 @@ function render(): void {
 
   const provider = currentProvider(snapshot);
   const isMobile = isMobilePlatform(snapshot.platform);
-  const isGroupsView = !isMobile && viewMode === "groups";
+  const isGroupsView = viewMode === "groups";
   const anyGroupNeedsAuth = snapshot.groupChats.some(groupHasNeedsAuth);
 
   if (isMobile) {
     root.innerHTML = `
       <div class="mobile-shell">
         <div class="mobile-tabs">
-          <sakuga-tabs id="provider-tabs" label="服务商" selected="${snapshot.providers.findIndex((p) => p.id === provider.id)}">
+          <sakuga-tabs id="provider-tabs" label="服务商" selected="${isGroupsView ? snapshot.providers.length : snapshot.providers.findIndex((p) => p.id === provider.id)}">
             ${snapshot.providers
               .map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.shortName)}</option>`)
               .join("")}
+            <option value="groups">群聊</option>
           </sakuga-tabs>
         </div>
         <div class="middle-column" style="width:100%;min-width:0;flex:1;border-right:none;">
-          ${renderMiddleContent(snapshot, provider)}
+          ${isGroupsView ? renderGroupMiddleContent(snapshot, provider) : renderMiddleContent(snapshot, provider)}
         </div>
+        ${isGroupsView ? `
+        <div class="mobile-group-stage" style="width:100%;min-width:0;flex:1 1 0;min-height:0;display:flex;flex-direction:column;border-top:1px solid var(--border);">
+          ${renderGroupRightStage(snapshot)}
+        </div>` : ""}
       </div>
     `;
   } else {
@@ -3420,7 +3432,8 @@ function render(): void {
 }
 
 function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
-  document.querySelector("#group-chat-rail-btn")?.addEventListener("click", async () => {
+  // 切到群聊视图：桌面端左侧 rail 按钮与移动端顶栏“群聊”Tab 共用。
+  const switchToGroups = async (): Promise<void> => {
     if (viewMode === "groups") return;
     if (modal.kind !== "none") {
       await setModal({ kind: "none" });
@@ -3428,6 +3441,10 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
     viewMode = "groups";
     const targetId = state.activeGroupId ?? state.groupChats[0]?.id ?? null;
     await callCommand("select_group_chat", { groupId: targetId });
+  };
+
+  document.querySelector("#group-chat-rail-btn")?.addEventListener("click", () => {
+    void switchToGroups();
   });
 
   const switchProvider = async (nextId: ProviderId): Promise<void> => {
@@ -3445,10 +3462,14 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
     });
   });
 
-  // 移动端顶栏：Sakuga Tabs，点选后走同一套切服务商逻辑。
+  // 移动端顶栏：Sakuga Tabs，点选后走同一套切服务商逻辑；选中“群聊”则切群聊视图。
   document.querySelector("#provider-tabs")?.addEventListener("change", (ev) => {
-    const nextId = (ev as CustomEvent<{ index: number; value: string; label: string }>).detail.value as ProviderId;
-    void switchProvider(nextId);
+    const nextId = (ev as CustomEvent<{ index: number; value: string; label: string }>).detail.value;
+    if (nextId === "groups") {
+      void switchToGroups();
+      return;
+    }
+    void switchProvider(nextId as ProviderId);
   });
 
   const handleOpenCreateGroup = async () => {

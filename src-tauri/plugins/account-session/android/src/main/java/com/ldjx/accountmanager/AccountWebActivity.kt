@@ -1638,6 +1638,17 @@ class AccountWebActivity : AppCompatActivity() {
         if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) startIdentityProbeLoop(spec)
     }
 
+    /**
+     * 在主 WebView 上执行 JS。必须在主线程调用。
+     * 有可用 WebView 时返回 true，原始回调结果（JSON 编码）交给 [callback]；
+     * 没有可用 WebView 时返回 false。
+     */
+    fun evaluateJavascriptOnMainWebView(script: String, callback: (String?) -> Unit): Boolean {
+        val view = mainWebView ?: return false
+        view.evaluateJavascript(script) { raw -> callback(raw) }
+        return true
+    }
+
     private fun stopIdentityProbeLoop() {
         identityProbeRunnable?.let { uiHandler.removeCallbacks(it) }
         identityProbeRunnable = null

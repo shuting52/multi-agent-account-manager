@@ -181,6 +181,23 @@ pub async fn open_account_session(
 }
 
 #[cfg(mobile)]
+pub async fn eval_mobile_session_js(
+  app: &AppHandle,
+  uuid: &str,
+  script: &str,
+) -> Result<String, String> {
+  let bridge = app.state::<MobileSessionBridge<tauri::Wry>>();
+  bridge
+    .0
+    .run_mobile_plugin_async::<String>(
+      "evaluateJavascript",
+      serde_json::json!({ "uuid": uuid, "script": script }),
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[cfg(mobile)]
 pub async fn update_account_title(
   app: &AppHandle,
   switch_seq: u64,

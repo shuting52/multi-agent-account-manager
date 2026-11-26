@@ -1,5 +1,4 @@
 use crate::group_transport;
-#[cfg(desktop)]
 use crate::group_transport::ResolvedMemberTransport;
 use crate::platform::{self, current_platform_name, ProxyTestResult};
 use crate::providers::{
@@ -8,12 +7,9 @@ use crate::providers::{
 };
 #[cfg(desktop)]
 use crate::providers::is_verified_callback_origin;
-#[cfg(desktop)]
 use crate::site_adapters::SiteAdapterConfig;
 use crate::site_adapters::{self, SiteAdaptersSnapshot};
-#[cfg(desktop)]
 use crate::storage::GroupChatMessage;
-#[cfg(any(desktop, test))]
 use crate::storage::GroupThreadBinding;
 use crate::storage::{
   detect_conflicts, load_or_migrate_store, normalize_uuid, now_ms, save_store_atomic, AccountKey,
@@ -37,9 +33,7 @@ use uuid::Uuid;
 
 pub const APP_TITLE: &str = "叠号";
 const MAX_GROUP_MEMBERS: usize = 30;
-#[cfg(desktop)]
 const REVIEW_INLINE_CHAR_LIMIT: usize = 1200;
-#[cfg(desktop)]
 const REVIEW_FALLBACK_CHAR_LIMIT: usize = 4500;
 #[cfg_attr(not(desktop), allow(dead_code))]
 const AUTO_ROUTE_STICKY_MAX_USED_PCT: u8 = 85;
@@ -1730,7 +1724,6 @@ fn build_new_chat_click_js(adapter: &SiteAdapterConfig) -> String {
     .replace("__ADAPTER__", &adapter_json)
 }
 
-#[cfg(desktop)]
 #[derive(Debug, Clone)]
 struct GroupAttachment {
   filename: String,
@@ -2101,7 +2094,6 @@ fn build_hark_close_expanded_js() -> String {
     .to_string()
 }
 
-#[cfg(desktop)]
 fn build_group_send_js(adapter: &SiteAdapterConfig, job_id: &str, prompt_text: &str) -> String {
   let adapter_json = serde_json::to_string(adapter).unwrap_or_else(|_| "{}".to_string());
   let job_json = serde_json::to_string(job_id).unwrap_or_else(|_| "\"\"".to_string());
@@ -2631,7 +2623,6 @@ fn build_group_send_js(adapter: &SiteAdapterConfig, job_id: &str, prompt_text: &
     .replace("__PROMPT__", &prompt_json)
 }
 
-#[cfg(desktop)]
 fn build_group_poll_js(adapter: &SiteAdapterConfig, job_id: &str) -> String {
   let adapter_json = serde_json::to_string(adapter).unwrap_or_else(|_| "{}".to_string());
   let job_json = serde_json::to_string(job_id).unwrap_or_else(|_| "\"\"".to_string());
@@ -3374,7 +3365,6 @@ fn build_group_poll_js(adapter: &SiteAdapterConfig, job_id: &str) -> String {
     .replace("__JOB_ID__", &job_json)
 }
 
-#[cfg(desktop)]
 fn build_group_sync_latest_js(adapter: &SiteAdapterConfig, raw_user_content: &str) -> String {
   let adapter_json = serde_json::to_string(adapter).unwrap_or_else(|_| "{}".to_string());
   let query_json = serde_json::to_string(raw_user_content).unwrap_or_else(|_| "\"\"".to_string());
@@ -4009,8 +3999,9 @@ struct InnerState {
   cookie_checked_at: HashMap<AccountKey, u64>,
   #[cfg(desktop)]
   in_flight_group_members: HashMap<AccountKey, usize>,
-  #[cfg(desktop)]
   group_context_synced: HashMap<(String, AccountKey), (u64, u64)>,
+  #[cfg(not(desktop))]
+  mobile_group_turn_lock: Arc<tokio::sync::Mutex<()>>,
   #[cfg(desktop)]
   group_member_locks: HashMap<AccountKey, Arc<tokio::sync::Mutex<()>>>,
   #[cfg_attr(not(desktop), allow(dead_code))]
@@ -4106,8 +4097,9 @@ impl SessionManager {
         cookie_checked_at: HashMap::new(),
         #[cfg(desktop)]
         in_flight_group_members: HashMap::new(),
-        #[cfg(desktop)]
         group_context_synced: HashMap::new(),
+        #[cfg(not(desktop))]
+        mobile_group_turn_lock: Arc::new(tokio::sync::Mutex::new(())),
         #[cfg(desktop)]
         group_member_locks: HashMap::new(),
         group_channel_last_account: HashMap::new(),
@@ -9959,7 +9951,6 @@ impl SessionManager {
     (became_authenticated, needs_cookie_check)
   }
 
-  #[cfg(any(desktop, test))]
   fn resolve_member_alias_locked(locked: &InnerState, key: &AccountKey) -> Option<String> {
     if key.provider_id.is_external() {
       locked
@@ -10248,7 +10239,6 @@ impl SessionManager {
     }
   }
 
-  #[cfg(desktop)]
   fn compute_group_knowledge_fingerprint(group: &GroupChatRecord, member: &AccountKey) -> u64 {
     use std::hash::{Hash, Hasher};
 
@@ -11164,13 +11154,6 @@ impl SessionManager {
     target_members: Option<Vec<AccountKey>>,
     auto_channels: Option<Vec<String>>,
   ) -> Result<ManagerSnapshot, String> {
-    #[cfg(not(desktop))]
-    {
-      let _ = (app, group_id, content, target_members, auto_channels);
-      Err("群聊功能暂仅支持桌面端".to_string())
-    }
-
-    #[cfg(desktop)]
     {
       let trimmed = content.trim().to_string();
       if trimmed.is_empty() {
@@ -11355,7 +11338,6 @@ impl SessionManager {
     }
   }
 
-  #[cfg(desktop)]
   #[allow(clippy::too_many_arguments)]
   async fn run_group_member_turn_with_failover(
     self: &Arc<Self>,
@@ -11502,13 +11484,6 @@ impl SessionManager {
     group_id: String,
     msg_id: String,
   ) -> Result<ManagerSnapshot, String> {
-    #[cfg(not(desktop))]
-    {
-      let _ = (app, group_id, msg_id);
-      Err("群聊功能暂仅支持桌面端".to_string())
-    }
-
-    #[cfg(desktop)]
     {
       let (snap, member_key, user_msg_id, raw_content, stage_label, hop_depth, auto_ch) = {
         let mut locked = self.inner.lock().await;
@@ -11631,13 +11606,6 @@ impl SessionManager {
     group_id: String,
     msg_id: String,
   ) -> Result<ManagerSnapshot, String> {
-    #[cfg(not(desktop))]
-    {
-      let _ = (app, group_id, msg_id);
-      Err("群聊功能暂仅支持桌面端".to_string())
-    }
-
-    #[cfg(desktop)]
     {
       let (member_key, raw_user_content, app_data_dir) = {
         let locked = self.inner.lock().await;
@@ -11692,43 +11660,101 @@ impl SessionManager {
         (member_key, raw_user_content, locked.app_data_dir.clone())
       };
 
-      let (wv, _) = self
-        .ensure_group_member_webview_ready(app, &member_key)
-        .await?;
-      Self::wake_and_settle_group_webview(&wv).await;
+      #[cfg(not(any(desktop, mobile)))]
+      return Err("群聊同步暂不支持当前平台".to_string());
 
-      let host = wv
-        .url()
-        .ok()
-        .and_then(|u| u.host_str().map(|s| s.to_ascii_lowercase()))
-        .unwrap_or_default();
-      let adapter = site_adapters::resolve_adapter_for_host(&app_data_dir, &host);
-      let is_hark = host.contains("hark.com");
+      #[cfg(desktop)]
+      let final_text = {
+        let (wv, _) = self
+          .ensure_group_member_webview_ready(app, &member_key)
+          .await?;
+        Self::wake_and_settle_group_webview(&wv).await;
 
-      let sync_js = build_group_sync_latest_js(&adapter, &raw_user_content);
-      let res = Self::eval_json_callback(&wv, &sync_js)
-        .await
-        .ok_or_else(|| "读取该账号页面内容超时，请前往原生页面确认后重试".to_string())?;
-      let raw_text = res
-        .get("text")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-      let mut final_text = Self::clean_extracted_reply_text(&raw_text);
-      if is_hark && !final_text.trim().is_empty() {
-        final_text = self
-          .extract_hark_expanded_card_if_needed(&wv, &final_text)
-          .await;
-        final_text = Self::clean_extracted_reply_text(&final_text);
-      }
-      if final_text.trim().is_empty() {
-        let err_hint = res
-          .get("error")
+        let host = wv
+          .url()
+          .ok()
+          .and_then(|u| u.host_str().map(|s| s.to_ascii_lowercase()))
+          .unwrap_or_default();
+        let adapter = site_adapters::resolve_adapter_for_host(&app_data_dir, &host);
+        let is_hark = host.contains("hark.com");
+
+        let sync_js = build_group_sync_latest_js(&adapter, &raw_user_content);
+        let res = Self::eval_json_callback(&wv, &sync_js)
+          .await
+          .ok_or_else(|| "读取该账号页面内容超时，请前往原生页面确认后重试".to_string())?;
+        let raw_text = res
+          .get("text")
           .and_then(|v| v.as_str())
-          .filter(|s| !s.trim().is_empty())
-          .unwrap_or("暂未从该账号原生页面读取到有效回复，请前往页面确认后再同步");
-        return Err(err_hint.to_string());
-      }
+          .unwrap_or("")
+          .to_string();
+        let mut text = Self::clean_extracted_reply_text(&raw_text);
+        if is_hark && !text.trim().is_empty() {
+          text = self
+            .extract_hark_expanded_card_if_needed(&wv, &text)
+            .await;
+          text = Self::clean_extracted_reply_text(&text);
+        }
+        if text.trim().is_empty() {
+          let err_hint = res
+            .get("error")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or("暂未从该账号原生页面读取到有效回复，请前往页面确认后再同步");
+          return Err(err_hint.to_string());
+        }
+        text
+      };
+
+      #[cfg(mobile)]
+      let final_text = {
+        // 移动端没有后台 WebView：串行锁住前台会话，打开成员会话后用桥接
+        // eval build_group_sync_latest_js 读页面最新回复。
+        // hark 展开卡片是桌面端专属流程，移动端跳过，直接取页面最新文本。
+        let mobile_serial_lock = {
+          let locked = self.inner.lock().await;
+          Arc::clone(&locked.mobile_group_turn_lock)
+        };
+        let _mobile_serial_guard = mobile_serial_lock.lock_owned().await;
+        let (view_instance_id, switch_seq, uuid) =
+          self.open_mobile_member_session(app, &member_key).await?;
+        self
+          .wait_mobile_page_commit(&member_key, switch_seq, view_instance_id)
+          .await?;
+        let page_url = Self::eval_mobile_page_state(app, &uuid)
+          .await
+          .map(|(href, _)| href)
+          .unwrap_or_default();
+        let host = Url::parse(&page_url)
+          .ok()
+          .and_then(|u| u.host_str().map(|s| s.to_ascii_lowercase()))
+          .filter(|h| !h.is_empty())
+          .or_else(|| {
+            resolve_provider(&member_key.provider_id)
+              .and_then(|s| Url::parse(&s.info.entry_url).ok())
+              .and_then(|u| u.host_str().map(|s| s.to_ascii_lowercase()))
+          })
+          .unwrap_or_default();
+        let adapter = site_adapters::resolve_adapter_for_host(&app_data_dir, &host);
+        let sync_js = build_group_sync_latest_js(&adapter, &raw_user_content);
+        let res = Self::eval_mobile_json(app, &uuid, &sync_js)
+          .await
+          .ok_or_else(|| "读取该账号页面内容超时，请前往原生页面确认后重试".to_string())?;
+        let raw_text = res
+          .get("text")
+          .and_then(|v| v.as_str())
+          .unwrap_or("")
+          .to_string();
+        let text = Self::clean_extracted_reply_text(&raw_text);
+        if text.trim().is_empty() {
+          let err_hint = res
+            .get("error")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or("暂未从该账号原生页面读取到有效回复，请前往页面确认后再同步");
+          return Err(err_hint.to_string());
+        }
+        text
+      };
 
       let snap = {
         let mut locked = self.inner.lock().await;
@@ -11789,7 +11815,6 @@ impl SessionManager {
     serde_json::from_str::<serde_json::Value>(&raw).ok()
   }
 
-  #[cfg(desktop)]
   async fn update_group_message_state(
     &self,
     app: &AppHandle,
@@ -11911,7 +11936,6 @@ impl SessionManager {
     Err("成员页面加载超时，请切换至该账号页确认状态".to_string())
   }
 
-  #[cfg(desktop)]
   fn normalize_url_for_thread(url: &Url) -> String {
     let scheme = url.scheme().to_ascii_lowercase();
     let host = url.host_str().unwrap_or("").to_ascii_lowercase();
@@ -12098,7 +12122,6 @@ impl SessionManager {
     }
   }
 
-  #[cfg(desktop)]
   async fn resolve_member_transport_locked(
     locked: &InnerState,
     key: &AccountKey,
@@ -12119,7 +12142,6 @@ impl SessionManager {
     Ok(ResolvedMemberTransport::WebView { key: key.clone() })
   }
 
-  #[cfg(desktop)]
   fn sanitize_history_assistant_text(raw: &str) -> Option<String> {
     let mut s = raw.trim();
     if s.is_empty() {
@@ -12183,7 +12205,6 @@ impl SessionManager {
     Some(s.chars().take(240).collect())
   }
 
-  #[cfg(desktop)]
   #[allow(clippy::too_many_arguments)]
   #[cfg_attr(not(desktop), allow(dead_code))]
   fn sanitize_shared_context_for_prompt(raw: &str) -> String {
@@ -12319,7 +12340,6 @@ impl SessionManager {
     }
   }
 
-  #[cfg(desktop)]
   fn sanitize_shared_context_for_hark(raw: &str) -> String {
     let base = Self::sanitize_shared_context_for_prompt(raw);
     let mut out_lines: Vec<String> = Vec::new();
@@ -12349,7 +12369,6 @@ impl SessionManager {
     out_lines.join("\n").chars().take(3000).collect()
   }
 
-  #[cfg(desktop)]
   async fn build_turn_prompt_for_member(
     &self,
     group_id: &str,
@@ -12571,7 +12590,6 @@ impl SessionManager {
     Some((system_section, user_section, full_prompt, fingerprint))
   }
 
-  #[cfg(desktop)]
   #[allow(clippy::too_many_arguments)]
   async fn run_group_member_turn(
     self: &Arc<Self>,
@@ -12611,24 +12629,63 @@ impl SessionManager {
 
     match transport {
       ResolvedMemberTransport::WebView { .. } => {
-        let member_lock = {
-          let mut locked = self.inner.lock().await;
-          *locked
-            .in_flight_group_members
-            .entry(member_key.clone())
-            .or_insert(0) += 1;
-          Self::apply_desktop_layout_locked(app, &locked);
-          Arc::clone(
-            locked
-              .group_member_locks
+        #[cfg(desktop)]
+        {
+          let member_lock = {
+            let mut locked = self.inner.lock().await;
+            *locked
+              .in_flight_group_members
               .entry(member_key.clone())
-              .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
-          )
-        };
-        let _member_guard = member_lock.lock_owned().await;
-        let reply = if let Ok(_permit) = Arc::clone(&self.group_worker_semaphore).acquire_owned().await {
+              .or_insert(0) += 1;
+            Self::apply_desktop_layout_locked(app, &locked);
+            Arc::clone(
+              locked
+                .group_member_locks
+                .entry(member_key.clone())
+                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
+            )
+          };
+          let _member_guard = member_lock.lock_owned().await;
+          let reply = if let Ok(_permit) = Arc::clone(&self.group_worker_semaphore).acquire_owned().await {
+            self
+              .execute_webview_member_turn(
+                app,
+                group_id,
+                member_key,
+                msg_id,
+                user_msg_id,
+                raw_user_content,
+                stage_instruction,
+                fallback_stage_instruction,
+                attachment,
+                hop_depth,
+              )
+              .await
+          } else {
+            None
+          };
+
+          {
+            let mut locked = self.inner.lock().await;
+            if let Some(cnt) = locked.in_flight_group_members.get_mut(member_key) {
+              *cnt = cnt.saturating_sub(1);
+              if *cnt == 0 {
+                locked.in_flight_group_members.remove(member_key);
+              }
+            }
+            if let Some(entry) = locked.warm_pool.get_mut(member_key) {
+              entry.last_used_ms = now_ms();
+            }
+            Self::apply_desktop_layout_locked(app, &locked);
+          }
+          reply
+        }
+        #[cfg(mobile)]
+        {
+          // 移动端只有一个前台会话：全局串行锁由 execute_mobile_webview_member_turn
+          // 全程持有，两个成员的回合绝不能交错。
           self
-            .execute_webview_member_turn(
+            .execute_mobile_webview_member_turn(
               app,
               group_id,
               member_key,
@@ -12641,24 +12698,11 @@ impl SessionManager {
               hop_depth,
             )
             .await
-        } else {
-          None
-        };
-
-        {
-          let mut locked = self.inner.lock().await;
-          if let Some(cnt) = locked.in_flight_group_members.get_mut(member_key) {
-            *cnt = cnt.saturating_sub(1);
-            if *cnt == 0 {
-              locked.in_flight_group_members.remove(member_key);
-            }
-          }
-          if let Some(entry) = locked.warm_pool.get_mut(member_key) {
-            entry.last_used_ms = now_ms();
-          }
-          Self::apply_desktop_layout_locked(app, &locked);
         }
-        reply
+        #[cfg(not(any(desktop, mobile)))]
+        {
+          None
+        }
       }
       ResolvedMemberTransport::OpenAiApi { agent }
       | ResolvedMemberTransport::LocalCli { agent } => {
@@ -12679,7 +12723,6 @@ impl SessionManager {
     }
   }
 
-  #[cfg(desktop)]
   #[allow(clippy::too_many_arguments)]
   async fn execute_external_member_turn(
     self: &Arc<Self>,
@@ -12762,16 +12805,34 @@ impl SessionManager {
 
     let result = match agent.kind {
       ExternalAgentKind::OpenaiApi => {
-        group_transport::execute_openai_api_turn(agent, &system_section, &user_section, |partial| {
-          let _ = prog_tx.send(partial);
-        })
-        .await
+        #[cfg(desktop)]
+        {
+          group_transport::execute_openai_api_turn(agent, &system_section, &user_section, |partial| {
+            let _ = prog_tx.send(partial);
+          })
+          .await
+        }
+        #[cfg(not(desktop))]
+        {
+          // reqwest 只在桌面端目标的 Cargo.toml 依赖里，移动端目标没有 HTTP 客户端，
+          // OpenAI API 成员暂不支持移动端（放行需在 Cargo.toml 里为移动端添加 reqwest）。
+          let _ = (&system_section, &user_section, &prog_tx);
+          Err("OpenAI API 成员仅支持桌面端".to_string())
+        }
       }
       ExternalAgentKind::LocalCli => {
-        group_transport::execute_local_cli_turn(agent, &full_prompt, |partial| {
-          let _ = prog_tx.send(partial);
-        })
-        .await
+        #[cfg(desktop)]
+        {
+          group_transport::execute_local_cli_turn(agent, &full_prompt, |partial| {
+            let _ = prog_tx.send(partial);
+          })
+          .await
+        }
+        #[cfg(not(desktop))]
+        {
+          let _ = (&full_prompt, &prog_tx);
+          Err("本地 CLI 仅支持桌面端".to_string())
+        }
       }
     };
 
@@ -13463,6 +13524,753 @@ impl SessionManager {
     None
   }
 
+  #[cfg(not(desktop))]
+  async fn eval_mobile_json(app: &AppHandle, uuid: &str, js: &str) -> Option<serde_json::Value> {
+    // 桥接返回 WebView.evaluateJavascript 的原始结果字符串（JSON 编码）。
+    // 解析照抄桌面端 eval_json_callback：先按 JSON 字符串解析再解析成 Value，
+    // 失败再直接按 Value 解析；"null"/空当作 None。
+    let raw = crate::platform::mobile::eval_mobile_session_js(app, uuid, js)
+      .await
+      .ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == "null" {
+      return None;
+    }
+    if let Ok(inner_json) = serde_json::from_str::<String>(&raw) {
+      if let Ok(val) = serde_json::from_str::<serde_json::Value>(&inner_json) {
+        return Some(val);
+      }
+    }
+    serde_json::from_str::<serde_json::Value>(&raw).ok()
+  }
+
+  #[cfg(not(desktop))]
+  async fn eval_mobile_page_state(app: &AppHandle, uuid: &str) -> Option<(String, bool)> {
+    let val = Self::eval_mobile_json(
+      app,
+      uuid,
+      "JSON.stringify({ href: window.location.href, ready: document.readyState })",
+    )
+    .await?;
+    let href = val
+      .get("href")
+      .and_then(|v| v.as_str())
+      .unwrap_or("")
+      .to_string();
+    if href.is_empty() {
+      return None;
+    }
+    let ready = val.get("ready").and_then(|v| v.as_str()) == Some("complete");
+    Some((href, ready))
+  }
+
+  #[cfg(not(desktop))]
+  async fn open_mobile_member_session(
+    self: &Arc<Self>,
+    app: &AppHandle,
+    member_key: &AccountKey,
+  ) -> Result<(u64, u64, String), String> {
+    // 复用移动端切账号的流程：发新 switch_seq、分配 view_instance_id、
+    // 关掉当前前台会话，再调 open_mobile_session 打开该成员的独立会话。
+    // 与 switch_account_internal 的移动端分支不同：不碰 active_group_id 与
+    // selected_provider_id（群聊回合不应把界面切出群聊）。
+    let switch_seq = self.current_seq.fetch_add(1, Ordering::SeqCst) + 1;
+    let view_instance_id = self.view_counter.fetch_add(1, Ordering::SeqCst);
+    let account = {
+      let mut locked = self.inner.lock().await;
+      if !locked.conflicts.is_empty() {
+        return Err("存在 UUID 归属冲突，已停留在管理页".to_string());
+      }
+      let Some(acc) = locked
+        .store
+        .accounts
+        .iter()
+        .find(|a| a.provider_id == member_key.provider_id && a.uuid == member_key.uuid)
+        .cloned()
+      else {
+        return Err("账号不存在或已被移除".to_string());
+      };
+      if acc.auth_state == AuthState::LoggedOut {
+        return Err("该账号当前处于未登录状态，请先前往登录".to_string());
+      }
+      platform::parse_account_proxy(acc.proxy_url.as_deref().unwrap_or_default())?;
+      self.hide_foreground_slot(app, switch_seq, &mut locked).await;
+      acc
+    };
+    // open_mobile_session 在插件侧失败时返回 Ok（带提示的快照）而非 Err，
+    // 以 active_slot 是否已换成目标会话为准再确认一次。
+    self
+      .open_mobile_session(app, account, switch_seq, view_instance_id, false)
+      .await?;
+    let open_err = {
+      let locked = self.inner.lock().await;
+      if locked
+        .active_slot
+        .as_ref()
+        .map(|s| {
+          s.account_key == *member_key
+            && s.view_instance_id == view_instance_id
+            && s.switch_seq == switch_seq
+        })
+        .unwrap_or(false)
+      {
+        None
+      } else {
+        Some(
+          locked
+            .notice
+            .clone()
+            .unwrap_or_else(|| "打开成员会话失败，请切换至该账号页面确认状态".to_string()),
+        )
+      }
+    };
+    if let Some(err) = open_err {
+      return Err(err);
+    }
+    Ok((view_instance_id, switch_seq, member_key.uuid.clone()))
+  }
+
+  #[cfg(not(desktop))]
+  async fn wait_mobile_page_commit(
+    &self,
+    key: &AccountKey,
+    switch_seq: u64,
+    view_instance_id: u64,
+  ) -> Result<(), String> {
+    // 轮询 PageCommitVisible 处理里更新的状态：active_slot 换成目标会话且
+    // committed 置 true（commit_mobile_session 里做的）。与桌面端
+    // ensure_group_member_webview_ready 同款 200 次 × 250ms 超时。
+    // 不用新增 InnerState 字段：active_slot + committed 已够轮询。
+    for _ in 0..200 {
+      if self.current_seq.load(Ordering::SeqCst) != switch_seq {
+        return Err("会话已被切换，请重试".to_string());
+      }
+      {
+        let locked = self.inner.lock().await;
+        let ready = locked
+          .active_slot
+          .as_ref()
+          .map(|s| {
+            s.account_key == *key
+              && s.view_instance_id == view_instance_id
+              && s.switch_seq == switch_seq
+              && s.committed
+          })
+          .unwrap_or(false);
+        if ready {
+          return Ok(());
+        }
+        if locked.active_slot.is_none() {
+          return Err("打开成员会话失败，请切换至该账号页面确认状态".to_string());
+        }
+      }
+      tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    Err("成员页面加载超时，请切换至该账号页确认状态".to_string())
+  }
+
+  #[cfg(not(desktop))]
+  async fn wait_mobile_navigation_settled(
+    app: &AppHandle,
+    uuid: &str,
+    old_href_norm: &str,
+  ) -> Option<String> {
+    // 等线程跳转落地：readyState complete 且规范化后的地址已离开旧页。
+    // 最长 30 秒；超时后最后再读一次地址，只要已不在旧页就放行。
+    for _ in 0..120 {
+      tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+      if let Some((href, ready)) = Self::eval_mobile_page_state(app, uuid).await {
+        if ready {
+          if let Ok(url) = Url::parse(&href) {
+            if Self::normalize_url_for_thread(&url) != old_href_norm {
+              return Some(href);
+            }
+          }
+        }
+      }
+    }
+    if let Some((href, _)) = Self::eval_mobile_page_state(app, uuid).await {
+      if let Ok(url) = Url::parse(&href) {
+        if Self::normalize_url_for_thread(&url) != old_href_norm {
+          return Some(href);
+        }
+      }
+    }
+    None
+  }
+
+  #[cfg(not(desktop))]
+  async fn persist_mobile_thread_binding(
+    &self,
+    app: &AppHandle,
+    group_id: &str,
+    member_key: &AccountKey,
+    current_url: &str,
+    adapter: &SiteAdapterConfig,
+  ) {
+    // 与桌面端 persist_group_thread_binding 同款落盘逻辑，只是不依赖 Webview，
+    // 当前地址由调用方在回合结束时 eval 读回。
+    if adapter.thread_url_patterns.is_empty() {
+      return;
+    }
+    let matches_pat = adapter
+      .thread_url_patterns
+      .iter()
+      .any(|p| !p.is_empty() && current_url.contains(p.as_str()));
+    if !matches_pat {
+      return;
+    }
+    let Ok(cur_url) = Url::parse(current_url) else {
+      return;
+    };
+    let snap_opt = {
+      let mut locked = self.inner.lock().await;
+      let valid_url = resolve_provider(&member_key.provider_id).is_some_and(|spec| {
+        matches!(
+          classify_top_level_url(&spec, &cur_url, false),
+          NavigationDecision::AllowHttps
+        )
+      });
+      if !valid_url {
+        return;
+      }
+      let Some(g) = locked
+        .store
+        .group_chats
+        .iter_mut()
+        .find(|g| g.id == group_id)
+      else {
+        return;
+      };
+      if let Some(existing) = g
+        .thread_bindings
+        .iter_mut()
+        .find(|tb| &tb.member == member_key)
+      {
+        if existing.thread_url == current_url {
+          return;
+        }
+        existing.thread_url = current_url.to_string();
+        existing.updated_at_ms = now_ms();
+      } else {
+        g.thread_bindings.push(GroupThreadBinding {
+          member: member_key.clone(),
+          thread_url: current_url.to_string(),
+          updated_at_ms: now_ms(),
+        });
+      }
+      let _ = save_store_atomic(&locked.store_path, &locked.store);
+      Some(Self::snapshot_from_locked(&locked))
+    };
+    if let Some(snap) = snap_opt {
+      self.emit_snapshot(app, &snap);
+    }
+  }
+
+  #[cfg(not(desktop))]
+  #[allow(clippy::too_many_arguments)]
+  async fn execute_mobile_webview_member_turn(
+    self: &Arc<Self>,
+    app: &AppHandle,
+    group_id: &str,
+    member_key: &AccountKey,
+    msg_id: &str,
+    user_msg_id: &str,
+    raw_user_content: &str,
+    stage_instruction: Option<&str>,
+    fallback_stage_instruction: Option<&str>,
+    attachment: Option<&GroupAttachment>,
+    hop_depth: u8,
+  ) -> Option<String> {
+    // 前台只有一个可见会话：整个回合（打开会话 → 轮询结束）持有全局串行锁，
+    // 并行模式下各成员的任务也会在这里排队，绝不交错。
+    let mobile_serial_lock = {
+      let locked = self.inner.lock().await;
+      Arc::clone(&locked.mobile_group_turn_lock)
+    };
+    let _mobile_serial_guard = mobile_serial_lock.lock_owned().await;
+
+    if !self
+      .update_group_message_state(
+        app,
+        group_id,
+        msg_id,
+        GroupReplyStatus::Sending,
+        None,
+        Some(None),
+        false,
+      )
+      .await
+    {
+      return None;
+    }
+
+    let (view_instance_id, switch_seq, uuid) = match self
+      .open_mobile_member_session(app, member_key)
+      .await
+    {
+      Ok(v) => v,
+      Err(err) => {
+        self
+          .update_group_message_state(
+            app,
+            group_id,
+            msg_id,
+            GroupReplyStatus::Error,
+            Some(String::new()),
+            Some(Some(err)),
+            true,
+          )
+          .await;
+        return None;
+      }
+    };
+    if let Err(err) = self
+      .wait_mobile_page_commit(member_key, switch_seq, view_instance_id)
+      .await
+    {
+      self
+        .update_group_message_state(
+          app,
+          group_id,
+          msg_id,
+          GroupReplyStatus::Error,
+          Some(String::new()),
+          Some(Some(err)),
+          true,
+        )
+        .await;
+      return None;
+    }
+
+    // 线程绑定：已有记录且与当前页不同时跳过去，重新等页面就绪；
+    // 没有记录就跳过这步，在当前会话里直接发。
+    let (app_data_dir, bound_url) = {
+      let locked = self.inner.lock().await;
+      let bound = locked
+        .store
+        .group_chats
+        .iter()
+        .find(|g| g.id == group_id)
+        .and_then(|g| g.thread_bindings.iter().find(|tb| &tb.member == member_key))
+        .map(|tb| tb.thread_url.clone());
+      (locked.app_data_dir.clone(), bound)
+    };
+    let mut current_url = Self::eval_mobile_page_state(app, &uuid)
+      .await
+      .map(|(href, _)| href)
+      .unwrap_or_default();
+    if let Some(bound_str) = bound_url {
+      if let (Ok(target_url), Some(spec)) = (
+        Url::parse(&bound_str),
+        resolve_provider(&member_key.provider_id),
+      ) {
+        let target_norm = Self::normalize_url_for_thread(&target_url);
+        let cur_norm = Url::parse(&current_url)
+          .map(|u| Self::normalize_url_for_thread(&u))
+          .unwrap_or_default();
+        if matches!(
+          classify_top_level_url(&spec, &target_url, false),
+          NavigationDecision::AllowHttps
+        ) && target_norm != cur_norm
+        {
+          let nav_js = format!(
+            "window.location.href = {}",
+            serde_json::to_string(&bound_str)
+              .unwrap_or_else(|_| format!("\"{bound_str}\""))
+          );
+          let _ = Self::eval_mobile_json(app, &uuid, &nav_js).await;
+          match Self::wait_mobile_navigation_settled(app, &uuid, &cur_norm).await {
+            Some(new_href) => current_url = new_href,
+            None => {
+              self
+                .update_group_message_state(
+                  app,
+                  group_id,
+                  msg_id,
+                  GroupReplyStatus::Error,
+                  Some(String::new()),
+                  Some(Some("成员会话页面跳转超时，请重试".to_string())),
+                  true,
+                )
+                .await;
+              return None;
+            }
+          }
+        }
+      }
+    }
+
+    let Some((_, _, prompt_text, fingerprint)) = self
+      .build_turn_prompt_for_member(
+        group_id,
+        member_key,
+        view_instance_id,
+        msg_id,
+        user_msg_id,
+        raw_user_content,
+        stage_instruction,
+        hop_depth,
+      )
+      .await
+    else {
+      return None;
+    };
+
+    // 附件：移动端没有 try_attach_file_in_webview，照桌面端附加失败的 fallback
+    // 走——有 fallback_stage_instruction 就用它重生成提示词再发。
+    let mut effective_prompt_text = prompt_text;
+    if attachment.is_some() {
+      if let Some(fb_stage) = fallback_stage_instruction {
+        if let Some((_, _, fb_prompt, _)) = self
+          .build_turn_prompt_for_member(
+            group_id,
+            member_key,
+            view_instance_id,
+            msg_id,
+            user_msg_id,
+            raw_user_content,
+            Some(fb_stage),
+            hop_depth,
+          )
+          .await
+        {
+          effective_prompt_text = fb_prompt;
+        }
+      }
+    }
+
+    let adapter = {
+      let host = Url::parse(&current_url)
+        .ok()
+        .and_then(|u| u.host_str().map(|s| s.to_ascii_lowercase()))
+        .filter(|h| !h.is_empty())
+        .or_else(|| {
+          resolve_provider(&member_key.provider_id)
+            .and_then(|s| Url::parse(&s.info.entry_url).ok())
+            .and_then(|u| u.host_str().map(|s| s.to_ascii_lowercase()))
+        })
+        .unwrap_or_default();
+      site_adapters::resolve_adapter_for_host(&app_data_dir, &host)
+    };
+
+    // 发送：与桌面端同款，no_composer 时等一等重试，最多 24 次。
+    let send_js = build_group_send_js(&adapter, msg_id, &effective_prompt_text);
+    let mut send_res_opt = None;
+    let mut send_eval_misses = 0usize;
+    for attempt in 0..24 {
+      let send_res = match Self::eval_mobile_json(app, &uuid, &send_js).await {
+        Some(v) => {
+          send_eval_misses = 0;
+          v
+        }
+        None => {
+          send_eval_misses += 1;
+          if send_eval_misses >= 6 || attempt == 23 {
+            self
+              .update_group_message_state(
+                app,
+                group_id,
+                msg_id,
+                GroupReplyStatus::Error,
+                Some(String::new()),
+                Some(Some("无法向该账号页面注入消息脚本".to_string())),
+                true,
+              )
+              .await;
+            return None;
+          }
+          tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+          continue;
+        }
+      };
+      let ok = send_res.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+      let status_str = send_res
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("error");
+      if ok || status_str != "no_composer" || attempt == 23 {
+        send_res_opt = Some(send_res);
+        break;
+      }
+      tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    let send_res = send_res_opt?;
+
+    if !send_res
+      .get("ok")
+      .and_then(|v| v.as_bool())
+      .unwrap_or(false)
+    {
+      let status_str = send_res
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("error");
+      let err_msg = send_res
+        .get("error")
+        .and_then(|v| v.as_str())
+        .unwrap_or("向该账号发送消息失败")
+        .to_string();
+      let final_status = if status_str == "logged_out" || status_str == "needs_auth" {
+        self
+          .apply_logged_out_state(app, member_key.clone(), view_instance_id)
+          .await;
+        GroupReplyStatus::NeedsAuth
+      } else if status_str == "page_error" {
+        self
+          .apply_page_error_state(app, member_key.clone(), view_instance_id, err_msg.clone())
+          .await;
+        GroupReplyStatus::Error
+      } else {
+        GroupReplyStatus::Error
+      };
+      self
+        .update_group_message_state(
+          app,
+          group_id,
+          msg_id,
+          final_status,
+          Some(String::new()),
+          Some(Some(err_msg)),
+          true,
+        )
+        .await;
+      return None;
+    }
+
+    {
+      let mut locked = self.inner.lock().await;
+      locked.group_context_synced.insert(
+        (group_id.to_string(), member_key.clone()),
+        (view_instance_id, fingerprint),
+      );
+    }
+
+    if !self
+      .update_group_message_state(
+        app,
+        group_id,
+        msg_id,
+        GroupReplyStatus::Streaming,
+        Some(String::new()),
+        Some(None),
+        false,
+      )
+      .await
+    {
+      return None;
+    }
+
+    // 轮询：与桌面端同款，每 450ms 一次、最多 420 次，边收边推到群聊视图。
+    // 移动端没有桌面端的 reload 重试：eval 持续失败或 stalled_retry 直接置 Error。
+    // hark 展开卡片是桌面端专属流程，移动端跳过。
+    let poll_js = build_group_poll_js(&adapter, msg_id);
+    let mut last_pushed_text = String::new();
+    let mut last_pushed_is_transient = false;
+    let mut poll_eval_misses = 0usize;
+    for _ in 0..420 {
+      tokio::time::sleep(std::time::Duration::from_millis(450)).await;
+      let res = match Self::eval_mobile_json(app, &uuid, &poll_js).await {
+        Some(v) => {
+          poll_eval_misses = 0;
+          v
+        }
+        None => {
+          poll_eval_misses += 1;
+          if poll_eval_misses < 6 {
+            continue;
+          }
+          self
+            .update_group_message_state(
+              app,
+              group_id,
+              msg_id,
+              GroupReplyStatus::Error,
+              Some(if last_pushed_is_transient {
+                String::new()
+              } else {
+                last_pushed_text
+              }),
+              Some(Some("页面视图已关闭或刷新，连接中断".to_string())),
+              true,
+            )
+            .await;
+          return None;
+        }
+      };
+
+      let state = res.get("state").and_then(|v| v.as_str()).unwrap_or("streaming");
+      let is_transient = res
+        .get("transient")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+      let raw_text = res
+        .get("text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+      let text = if is_transient {
+        raw_text
+      } else {
+        Self::clean_extracted_reply_text(&raw_text)
+      };
+      let err_opt = res
+        .get("error")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+      match state {
+        "stalled_retry" => {
+          self
+            .update_group_message_state(
+              app,
+              group_id,
+              msg_id,
+              GroupReplyStatus::Error,
+              Some(String::new()),
+              Some(Some(
+                "发送后页面仍在发送中未发出，请切换至该账号页面检查网络后重试".to_string(),
+              )),
+              true,
+            )
+            .await;
+          return None;
+        }
+        "done" => {
+          let final_text = if !text.is_empty() {
+            text
+          } else if !last_pushed_is_transient {
+            last_pushed_text
+          } else {
+            String::new()
+          };
+          self
+            .update_group_message_state(
+              app,
+              group_id,
+              msg_id,
+              GroupReplyStatus::Done,
+              Some(final_text.clone()),
+              Some(None),
+              true,
+            )
+            .await;
+          let done_url = Self::eval_mobile_page_state(app, &uuid)
+            .await
+            .map(|(h, _)| h)
+            .unwrap_or_else(|| current_url.clone());
+          self
+            .persist_mobile_thread_binding(app, group_id, member_key, &done_url, &adapter)
+            .await;
+          return Some(final_text);
+        }
+        "needs_auth" => {
+          let final_text = if !text.is_empty() {
+            text
+          } else if !last_pushed_is_transient {
+            last_pushed_text
+          } else {
+            String::new()
+          };
+          self
+            .update_group_message_state(
+              app,
+              group_id,
+              msg_id,
+              GroupReplyStatus::NeedsAuth,
+              Some(final_text),
+              Some(Some(
+                err_opt
+                  .unwrap_or_else(|| "检测到授权确认弹窗，请前往该账号页面点击允许".to_string()),
+              )),
+              true,
+            )
+            .await;
+          return None;
+        }
+        "error" => {
+          let final_text = if !text.is_empty() {
+            text
+          } else if !last_pushed_is_transient {
+            last_pushed_text
+          } else {
+            String::new()
+          };
+          self
+            .update_group_message_state(
+              app,
+              group_id,
+              msg_id,
+              GroupReplyStatus::Error,
+              Some(final_text),
+              Some(Some(err_opt.unwrap_or_else(|| "生成回复失败".to_string()))),
+              true,
+            )
+            .await;
+          return None;
+        }
+        _ => {
+          if !is_transient && !text.is_empty() && text != last_pushed_text {
+            last_pushed_text = text.clone();
+            last_pushed_is_transient = false;
+            if !self
+              .update_group_message_state(
+                app,
+                group_id,
+                msg_id,
+                GroupReplyStatus::Streaming,
+                Some(text),
+                None,
+                false,
+              )
+              .await
+            {
+              return None;
+            }
+          }
+        }
+      }
+    }
+
+    if !last_pushed_text.is_empty() && !last_pushed_is_transient {
+      let final_text = last_pushed_text;
+      self
+        .update_group_message_state(
+          app,
+          group_id,
+          msg_id,
+          GroupReplyStatus::Done,
+          Some(final_text.clone()),
+          Some(None),
+          true,
+        )
+        .await;
+      let done_url = Self::eval_mobile_page_state(app, &uuid)
+        .await
+        .map(|(h, _)| h)
+        .unwrap_or_else(|| current_url.clone());
+      self
+        .persist_mobile_thread_binding(app, group_id, member_key, &done_url, &adapter)
+        .await;
+      return Some(final_text);
+    }
+
+    self
+      .update_group_message_state(
+        app,
+        group_id,
+        msg_id,
+        GroupReplyStatus::Error,
+        Some(String::new()),
+        Some(Some("等待回复超时，请切换至该账号页面查看详情".to_string())),
+        true,
+      )
+      .await;
+    None
+  }
+
   #[cfg_attr(not(desktop), allow(dead_code))]
   fn select_a2a_relay_targets(
     reply_text: &str,
@@ -13484,7 +14292,6 @@ impl SessionManager {
       .collect()
   }
 
-  #[cfg(desktop)]
   async fn run_group_review_pipeline(
     self: Arc<Self>,
     app: AppHandle,
@@ -13626,7 +14433,6 @@ impl SessionManager {
     }
   }
 
-  #[cfg(desktop)]
   #[allow(clippy::too_many_arguments)]
   fn run_group_a2a_chain(
     self: Arc<Self>,
