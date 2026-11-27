@@ -1021,6 +1021,8 @@ mod tests {
         auth_state: AuthState::Authenticated,
         cookie_expires_at_ms: None,
         cookie_session_only: false,
+        invite_code: None,
+        invite_remaining: None,
       }],
       account_cookies: cookies,
       group_chats: Vec::new(),

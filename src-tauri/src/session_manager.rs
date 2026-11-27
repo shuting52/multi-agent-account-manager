@@ -5014,6 +5014,8 @@ impl SessionManager {
         auth_state: initial_auth,
         cookie_expires_at_ms: None,
         cookie_session_only: false,
+        invite_code: None,
+        invite_remaining: None,
       });
       if let Err(err) = save_store_atomic(&locked.store_path, &locked.store) {
         locked.store.accounts.pop();
@@ -14908,6 +14910,8 @@ mod tests {
       auth_state: AuthState::Unknown,
       cookie_expires_at_ms: None,
       cookie_session_only: false,
+      invite_code: None,
+      invite_remaining: None,
     }
   }
 

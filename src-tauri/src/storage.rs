@@ -527,6 +527,8 @@ fn migrate_from_value(root: Value) -> Result<(AccountsStoreFile, bool), String> 
         auth_state,
         cookie_expires_at_ms,
         cookie_session_only,
+        invite_code: None,
+        invite_remaining: None,
       });
     }
   }
