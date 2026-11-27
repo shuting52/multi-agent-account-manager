@@ -1847,12 +1847,12 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
           </div>
           <div class="modal-hint">${platform === "windows" ? "通过 WebView2 原生接口按账号独立生效，留空则使用系统时区。" : "文档加载前注入该账号独立页面，支持夏令时，留空则使用系统时区。"}</div>
           ${!creating ? `
-          <label class="modal-desc" for="modal-invite-code-input">邀请码（在 Muse 邀请页面查看自己的邀请码和剩余次数）</label>
+          <label class="modal-desc" for="modal-invite-code-input">邀请码（同步时自动从 Muse 邀请页读取；读不到时再手动填）</label>
           <div class="invite-input-row">
             <sakuga-input id="modal-invite-code-input" maxlength="12" label="邀请码" placeholder="例如 NGVFLN" value="${escapeHtml(modal.inviteCodeDraft)}" autocomplete="off" ${saving ? "disabled" : ""}></sakuga-input>
             <sakuga-input id="modal-invite-remaining-input" maxlength="4" label="剩余次数" placeholder="剩余几次" value="${escapeHtml(modal.inviteRemainingDraft)}" autocomplete="off" inputmode="numeric" ${saving ? "disabled" : ""}></sakuga-input>
           </div>
-          <div class="modal-hint">填好后卡片第二行会显示邀请码和剩余次数，点一下邀请码就能复制。留空则不显示。</div>
+          <div class="modal-hint">卡片第二行会自动显示邀请码和剩余次数，点一下邀请码就能复制。自动读不到（比如还没同步过）才需要手动填；留空则不显示。</div>
           ` : ""}
           ${cookieInfo ? `<div class="cookie-detail-box ${cookieInfo.tone}" title="${escapeHtml(cookieInfo.tooltip)}"><span class="cookie-expiry-dot"></span><span>${escapeHtml(cookieInfo.detailText)}</span></div>` : ""}
           <div class="cookie-import-section">

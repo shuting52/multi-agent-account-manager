@@ -221,7 +221,7 @@ const LOGIN_CAPTURE_INIT_JS: &str = r#"(() => {
       if (!/^[A-Z0-9]{4,12}$/.test(clean)) return;
       const rem = typeof remaining === 'number' && Number.isFinite(remaining) && remaining >= 0 && remaining <= 1000
         ? Math.floor(remaining) : null;
-      const obj = { code: clean, remaining: rem };
+      const obj = { code: clean, remaining: rem, ts: Date.now() };
       window.__maamReferral = obj;
       try { localStorage.setItem('__maam_cached_referral__', JSON.stringify(obj)); } catch (_) {}
     };
@@ -275,12 +275,110 @@ const LOGIN_CAPTURE_INIT_JS: &str = r#"(() => {
         }
       } catch (_) {}
     };
+    // 0.2.15：邀请页自动扫。0.2.14 只在邀请页已经打开时才扫得到，但同
+    // 步从来不打开邀请页，所以卡片一直是“—”。这版让探针在页面藏着的时
+    // 候（document.visibilityState === 'hidden'，即后台同步 WebView，
+    // 用户看不见）顺路点开一次邀请入口、读完再关掉。页面可见时绝不点，
+    // 免得邀请页在用户眼前自己弹出来；扫的过程中一旦可见也立刻关页收手。
+    const referralCacheFresh = () => {
+      try {
+        const cur = (window.__maamReferral && window.__maamReferral.code) ? window.__maamReferral : null;
+        if (cur && typeof cur.ts === 'number' && Date.now() - cur.ts < 24 * 3600 * 1000) return true;
+        const cached = localStorage.getItem('__maam_cached_referral__');
+        if (cached) {
+          const d = JSON.parse(cached);
+          if (d && d.code && typeof d.ts === 'number' && Date.now() - d.ts < 24 * 3600 * 1000) return true;
+        }
+      } catch (_) {}
+      return false;
+    };
+    const findInviteTrigger = () => {
+      try {
+        const isVisibleEl = (el) => {
+          if (!el || typeof el.getClientRects !== 'function') return false;
+          const r = el.getClientRects();
+          if (!r || r.length === 0) return false;
+          const cs = window.getComputedStyle ? window.getComputedStyle(el) : null;
+          if (cs && (cs.display === 'none' || cs.visibility === 'hidden')) return false;
+          return true;
+        };
+        const nameOf = (el) => (((el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('title'))) || '') + ' ' + (el.textContent || ''));
+        const sels = [
+          'button[aria-label*="nvite" i]', 'a[aria-label*="nvite" i]',
+          'button[title*="nvite" i]', 'a[title*="nvite" i]',
+          'button[aria-label*="邀请" i]', 'a[aria-label*="邀请" i]',
+          'button[title*="邀请" i]', 'a[title*="邀请" i]',
+          'button[aria-label*="gift" i]', 'a[aria-label*="gift" i]',
+          'button[title*="gift" i]', 'a[title*="gift" i]',
+          'button[aria-label*="eferral" i]', 'a[aria-label*="eferral" i]'
+        ];
+        const roots = [];
+        document.querySelectorAll('header, nav').forEach((h) => roots.push(h));
+        roots.push(document);
+        for (const root of roots) {
+          for (const sel of sels) {
+            const els = root.querySelectorAll(sel);
+            for (const el of els) { if (isVisibleEl(el)) return el; }
+          }
+        }
+        const all = document.querySelectorAll('button, a, [role="button"]');
+        for (const el of all) {
+          if (isVisibleEl(el) && /邀请好友/.test(nameOf(el))) return el;
+        }
+      } catch (_) {}
+      return null;
+    };
+    const closeInviteSheet = () => {
+      try {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', bubbles: true }));
+        const closers = document.querySelectorAll('button[aria-label*="关闭" i], button[aria-label*="Close" i], button[title*="关闭" i], button[title*="Close" i]');
+        for (const el of closers) { try { el.click(); } catch (_) {} }
+      } catch (_) {}
+    };
+    // sweep 状态机，由 3 秒定时器驱动：idle -> clicked（等邀请页出现）-> done。
+    // 每一步都先确认页面仍是藏着的，一旦可见立刻关页、中止（不记 done，下次藏着时可重试）。
+    const referralSweepTick = () => {
+      try {
+        if (!isPrimaryHost) return;
+        const host = (location.hostname || '').toLowerCase();
+        if (host !== 'muse.ai' && !host.endsWith('.muse.ai')) return;
+        if (window.__maamReferralSweepDone) return;
+        if (referralCacheFresh()) { window.__maamReferralSweepDone = true; return; }
+        const st = window.__maamReferralSweep || (window.__maamReferralSweep = { phase: 'idle', since: 0 });
+        if (document.visibilityState !== 'hidden') {
+          if (st.phase === 'clicked') { closeInviteSheet(); st.phase = 'idle'; }
+          return;
+        }
+        if (st.phase === 'idle') {
+          const trigger = findInviteTrigger();
+          if (!trigger) return;
+          try { trigger.click(); } catch (_) { return; }
+          st.phase = 'clicked';
+          st.since = Date.now();
+          return;
+        }
+        if (st.phase === 'clicked') {
+          scanReferralDom();
+          if (window.__maamReferral && window.__maamReferral.code) {
+            closeInviteSheet();
+            window.__maamReferralSweepDone = true;
+            return;
+          }
+          if (Date.now() - st.since > 10000) {
+            closeInviteSheet();
+            window.__maamReferralSweepDone = true;
+          }
+        }
+      } catch (_) {}
+    };
     // collect 探针是另外一次 eval，IIFE 里的 const 传不过去（0.2.13 直接
     // 调 referralOut() 会抛 ReferenceError），必须挂 window 上。
     window.__maamReferralOut = referralOut;
     window.__maamScanReferralDom = scanReferralDom;
+    window.__maamReferralSweepTick = referralSweepTick;
     if (isPrimaryHost && !window.__maamReferralScanTimer) {
-      window.__maamReferralScanTimer = setInterval(() => { try { scanReferralDom(); } catch (_) {} }, 3000);
+      window.__maamReferralScanTimer = setInterval(() => { try { scanReferralDom(); } catch (_) {} try { referralSweepTick(); } catch (_) {} }, 3000);
     }
     const recordReferralFromNode = (node) => {
       if (!node || typeof node !== 'object' || Array.isArray(node)) return;
