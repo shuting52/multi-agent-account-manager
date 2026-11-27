@@ -13674,8 +13674,9 @@ impl SessionManager {
   /// 会先关掉它并把群聊带回前台，与 0.2.7 的行为一致。
   #[cfg(not(desktop))]
   // 0.2.11：单次后台打开（打开会话 + 等页面提交，各 50 秒超时）。
+  // 注意接收者必须是 &Arc<Self>：open_mobile_member_session 只认 Arc，&self 调不到它。
   async fn open_mobile_member_session_background_once(
-    &self,
+    self: &Arc<Self>,
     app: &AppHandle,
     member_key: &AccountKey,
   ) -> Result<(u64, u64, String), String> {
