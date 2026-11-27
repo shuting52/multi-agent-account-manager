@@ -1673,6 +1673,11 @@ class AccountWebActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView, url: String?) {
                 if (!ownsMainView(view, spec)) return
+                // 0.2.9：后台 WebView 不可见时 onPageCommitVisible 不触发，
+                // 页面加载完成信号作为第二就绪信号，Rust 侧同等对待。
+                if (url != null && url != "about:blank") {
+                    AccountSessionCoordinator.emitPageLoadFinished(spec, url)
+                }
                 val runnable = identityProbeRunnable
                 if (runnable != null && mainInputEnabled &&
                     lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) &&

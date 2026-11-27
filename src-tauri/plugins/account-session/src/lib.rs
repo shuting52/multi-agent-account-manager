@@ -56,6 +56,16 @@ pub enum MobileSessionEvent {
     view_instance_id: u64,
     url: String,
   },
+  /// 0.2.9：页面加载完成（WebViewClient.onPageFinished）。后台 WebView
+  /// 不可见时 onPageCommitVisible 不触发，用它作为第二就绪信号。
+  #[serde(rename_all = "camelCase")]
+  PageLoadFinished {
+    provider_id: String,
+    uuid: String,
+    switch_seq: u64,
+    view_instance_id: u64,
+    url: String,
+  },
   #[serde(rename_all = "camelCase")]
   IdentityDetected {
     provider_id: String,

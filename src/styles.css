@@ -3086,15 +3086,26 @@ body,
   padding: 8px 10px;
   border-radius: 8px;
   font-size: 11.5px;
+  /* 0.2.9：文案整行在上、按钮行在下。旧的横排 + space-between 会把中文
+     span 挤到 min-content 宽度，一个字一行。 */
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
+}
+
+.group-auth-card > span,
+.group-error-box > span {
+  min-width: 0;
+  overflow-wrap: break-word;
+  line-height: 1.6;
 }
 
 .group-error-ops {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 6px;
   flex-shrink: 0;
 }
@@ -4556,6 +4567,15 @@ body,
   flex-wrap: nowrap;
   overflow-x: auto;
   scrollbar-width: none;
+  /* 0.2.9：模式行常驻后不许被消息区挤出屏幕。 */
+  flex-shrink: 0;
+}
+
+/* 0.2.9：展开的成员区过高时内部滚动，模式行与输入框不被顶出屏幕。 */
+.mobile-group-stage .group-header-expanded {
+  max-height: 42vh;
+  overflow-y: auto;
+  flex-shrink: 0;
 }
 
 .mobile-group-stage .group-workflow-bar::-webkit-scrollbar {
@@ -4625,6 +4645,8 @@ body,
   flex-wrap: nowrap;
   overflow-x: auto;
   scrollbar-width: none;
+  /* 0.2.9：模式行常驻后不许被消息区挤出屏幕。 */
+  flex-shrink: 0;
 }
 
 .mobile-group-stage .workflow-mode-group,
@@ -4771,6 +4793,12 @@ body,
   width: 22px;
   height: 22px;
   flex-shrink: 0;
+}
+
+/* 0.2.9：真 favicon 是方形位图，圆角 + cover，列表里与品牌 SVG 观感一致。 */
+.more-provider-logo.full-bleed {
+  border-radius: 6px;
+  object-fit: cover;
 }
 
 .more-provider-name {

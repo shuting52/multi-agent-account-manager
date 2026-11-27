@@ -140,12 +140,12 @@ const PROVIDER_LOGOS: Record<string, ProviderLogoSpec> = {
   hark: { src: "/logos/hark.svg", fullBleed: false, monoDark: true },
   cue: { src: "/logos/cue.svg", fullBleed: false },
   chatgpt: { src: "/logos/chatgpt.svg", fullBleed: false },
-  doubao: { src: "/logos/doubao.svg", fullBleed: false },
-  jimeng: { src: "/logos/jimeng.svg", fullBleed: false },
+  doubao: { src: "/logos/doubao.png", fullBleed: true },
+  jimeng: { src: "/logos/jimeng.png", fullBleed: true },
   claude: { src: "/logos/claude.svg", fullBleed: false },
-  dola: { src: "/logos/dola.svg", fullBleed: false },
-  workbuddy: { src: "/logos/workbuddy.svg", fullBleed: false },
-  wabi: { src: "/logos/wabi.svg", fullBleed: false },
+  dola: { src: "/logos/dola.png", fullBleed: true },
+  workbuddy: { src: "/logos/workbuddy.jpg", fullBleed: true },
+  wabi: { src: "/logos/wabi.png", fullBleed: true },
 };
 
 const GROUP_SKILL_PRESETS: Array<Omit<GroupSharedSkill, "id" | "enabled">> = [
@@ -3198,9 +3198,30 @@ function renderGroupRightStage(state: ManagerSnapshot): string {
           })
           .join("");
 
+  // 0.2.9：模式行常驻（不在收纳区里），收起时也不被裁掉、不被顶出屏幕。
+  const workflowBarHtml = `
+        <div class="group-workflow-bar">
+          <div class="workflow-mode-group">
+            <span class="workflow-label">模式</span>
+            <button class="workflow-mode-btn ${workflowMode === "parallel" ? "active" : ""}" data-workflow-mode="parallel" type="button">并行</button>
+            <button class="workflow-mode-btn ${workflowMode === "review" ? "active" : ""}" data-workflow-mode="review" type="button">评审流</button>
+            <button class="workflow-mode-btn ${workflowMode === "a2a_relay" ? "active" : ""}" data-workflow-mode="a2a_relay" type="button">A2A接力</button>
+          </div>
+          ${workflowMode === "a2a_relay" ? `
+            <div class="workflow-hops-group">
+              <span class="workflow-label">接力上限</span>
+              <button class="workflow-hop-btn ${maxRelayHops === 1 ? "active" : ""}" data-relay-hops="1" type="button">1跳</button>
+              <button class="workflow-hop-btn ${maxRelayHops === 2 ? "active" : ""}" data-relay-hops="2" type="button">2跳</button>
+              <button class="workflow-hop-btn ${maxRelayHops === 3 ? "active" : ""}" data-relay-hops="3" type="button">3跳</button>
+            </div>
+          ` : ""}
+        </div>
+  `;
+
   // 0.2.8：群聊顶部收纳区（默认收起）：标题 + 成员卡片 + 模式/提及行只在展开时渲染。
   const headerExpandedHtml = groupHeaderExpanded
     ? `
+      <div class="group-header-expanded">
       <div class="group-chat-header">
         <div class="group-header-main">
           <div class="group-header-title-row">
@@ -3262,22 +3283,6 @@ function renderGroupRightStage(state: ManagerSnapshot): string {
             `}
         </div>
       </div>
-        <div class="group-workflow-bar">
-          <div class="workflow-mode-group">
-            <span class="workflow-label">模式</span>
-            <button class="workflow-mode-btn ${workflowMode === "parallel" ? "active" : ""}" data-workflow-mode="parallel" type="button">并行</button>
-            <button class="workflow-mode-btn ${workflowMode === "review" ? "active" : ""}" data-workflow-mode="review" type="button">评审流</button>
-            <button class="workflow-mode-btn ${workflowMode === "a2a_relay" ? "active" : ""}" data-workflow-mode="a2a_relay" type="button">A2A接力</button>
-          </div>
-          ${workflowMode === "a2a_relay" ? `
-            <div class="workflow-hops-group">
-              <span class="workflow-label">接力上限</span>
-              <button class="workflow-hop-btn ${maxRelayHops === 1 ? "active" : ""}" data-relay-hops="1" type="button">1跳</button>
-              <button class="workflow-hop-btn ${maxRelayHops === 2 ? "active" : ""}" data-relay-hops="2" type="button">2跳</button>
-              <button class="workflow-hop-btn ${maxRelayHops === 3 ? "active" : ""}" data-relay-hops="3" type="button">3跳</button>
-            </div>
-          ` : ""}
-        </div>
         <div class="group-target-chips grouped">
           <button class="group-target-chip ${selectedTargets.length === 0 && selectedAutoIds.length === 0 ? "active" : ""}" data-group-target="all" type="button">全体成员</button>
           ${targetCategories
@@ -3332,6 +3337,7 @@ function renderGroupRightStage(state: ManagerSnapshot): string {
             })
             .join("")}
         </div>
+      </div>
     `
     : "";
 
@@ -3339,11 +3345,12 @@ function renderGroupRightStage(state: ManagerSnapshot): string {
     <main class="group-chat-stage">
       <div class="group-header-toggle-bar">
         <button id="group-header-toggle-btn" class="group-header-toggle-btn" type="button" aria-expanded="${groupHeaderExpanded}">
-          <span class="group-header-toggle-title">${escapeHtml(activeGroup.name)} \u00b7 ${activeGroup.members.length} 位成员</span>
+          <span class="group-header-toggle-title">${escapeHtml(activeGroup.name)} \u00b7 ${activeGroup.members.length} 位成员 \u00b7 ${workflowMode === "parallel" ? "并行" : workflowMode === "review" ? "评审流" : "A2A接力"}</span>
           <span class="group-header-toggle-icon">${groupHeaderExpanded ? "\u25b4 收起" : "\u25be 展开"}</span>
         </button>
       </div>
       ${headerExpandedHtml}
+      ${workflowBarHtml}
       <div class="group-messages">${msgsHtml}</div>
       <div class="group-composer">
         <div id="group-target-hint" class="group-composer-hint">${escapeHtml(targetHint)}</div>
@@ -3432,7 +3439,12 @@ function render(): void {
         </div>
         ${moreProvidersOpen ? `
         <div class="more-providers-panel">
-          <div class="more-providers-title">选择平台添加账号</div>
+          <div class="more-providers-title">群聊 / 选择平台添加账号</div>
+          <button class="more-provider-row" data-open-groups type="button">
+            <svg class="more-provider-logo" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#8f8df7"/><circle cx="9" cy="9.5" r="2.8" fill="#fff"/><path d="M4 17.5c.7-2.6 2.6-4 5-4s4.3 1.4 5 4" stroke="#fff" stroke-width="1.7" fill="none" stroke-linecap="round"/><circle cx="16.5" cy="10" r="2.2" fill="#fff" opacity="0.85"/><path d="M13.5 17.5c.6-2 2-3 3.8-3 1.5 0 2.7.8 3.2 2.2" stroke="#fff" stroke-width="1.5" fill="none" stroke-linecap="round" opacity="0.85"/></svg>
+            <span class="more-provider-name">群聊</span>
+            <span class="more-provider-go">进入</span>
+          </button>
           ${snapshot.providers
             .map(
               (p) => `
@@ -3612,6 +3624,11 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
         cookieDraft: "",
       });
     });
+  });
+  // 0.2.9：更多平台列表顶部的「群聊」行，点一下收起面板并打开群聊页。
+  document.querySelector("[data-open-groups]")?.addEventListener("click", () => {
+    moreProvidersOpen = false;
+    void switchToGroups();
   });
 
   const handleOpenCreateGroup = async () => {

@@ -8685,6 +8685,37 @@ impl SessionManager {
           )
           .await;
       }
+      // 0.2.9：与 PageCommitVisible 完全同等对待。后台 WebView 不可见时
+      // onPageCommitVisible 不触发，onPageFinished 是第二就绪信号。
+      MobileSessionEvent::PageLoadFinished {
+        provider_id,
+        uuid,
+        switch_seq,
+        view_instance_id,
+        url,
+      } => {
+        let Some(pid) = ProviderId::parse(&provider_id) else {
+          return;
+        };
+        let Some(norm_uuid) = normalize_uuid(&uuid) else {
+          return;
+        };
+        let Ok(parsed_url) = Url::parse(&url) else {
+          return;
+        };
+        self
+          .commit_mobile_session(
+            app,
+            AccountKey {
+              provider_id: pid,
+              uuid: norm_uuid,
+            },
+            view_instance_id,
+            switch_seq,
+            parsed_url,
+          )
+          .await;
+      }
       MobileSessionEvent::IdentityDetected {
         provider_id,
         uuid,
@@ -11718,10 +11749,8 @@ impl SessionManager {
           Arc::clone(&locked.mobile_group_turn_lock)
         };
         let _mobile_serial_guard = mobile_serial_lock.lock_owned().await;
-        let (view_instance_id, switch_seq, uuid) =
-          self.open_mobile_member_session(app, &member_key).await?;
-        self
-          .wait_mobile_page_commit(&member_key, switch_seq, view_instance_id)
+        let (_view_instance_id, _switch_seq, uuid) = self
+          .open_mobile_member_session_ready(app, &member_key)
           .await?;
         let page_url = Self::eval_mobile_page_state(app, &uuid)
           .await
@@ -13572,6 +13601,7 @@ impl SessionManager {
     self: &Arc<Self>,
     app: &AppHandle,
     member_key: &AccountKey,
+    background: bool,
   ) -> Result<(u64, u64, String), String> {
     // 复用移动端切账号的流程：发新 switch_seq、分配 view_instance_id、
     // 关掉当前前台会话，再调 open_mobile_session 打开该成员的独立会话。
@@ -13603,8 +13633,10 @@ impl SessionManager {
     // open_mobile_session 在插件侧失败时返回 Ok（带提示的快照）而非 Err，
     // 以 active_slot 是否已换成目标会话为准再确认一次。
     // 0.2.8：群聊回合 background=true，后台打开成员会话，不把用户拽进成员原生页。
+    // 0.2.9：background 由调用方 open_mobile_member_session_ready 决定，
+    // 后台打不开时改前台打开再由下一回合带回群聊。
     self
-      .open_mobile_session(app, account, switch_seq, view_instance_id, false, true)
+      .open_mobile_session(app, account, switch_seq, view_instance_id, false, background)
       .await?;
     let open_err = {
       let locked = self.inner.lock().await;
@@ -13632,6 +13664,50 @@ impl SessionManager {
       return Err(err);
     }
     Ok((view_instance_id, switch_seq, member_key.uuid.clone()))
+  }
+
+  /// 0.2.9：群聊回合的打开 + 等就绪，带前台回落。
+  /// 先后台打开并等 PageCommitVisible / PageLoadFinished；后台等不到
+  /// （WebView 不可见时 onPageCommitVisible 不触发）或打不开，就改前台
+  /// 打开再等一次。两次都失败才报「打开成员会话失败」，不直接让回合死掉。
+  /// 前台打开后用户会短暂看到成员原生页，下一回合的 hide_foreground_slot
+  /// 会先关掉它并把群聊带回前台，与 0.2.7 的行为一致。
+  #[cfg(not(desktop))]
+  async fn open_mobile_member_session_ready(
+    self: &Arc<Self>,
+    app: &AppHandle,
+    member_key: &AccountKey,
+  ) -> Result<(u64, u64, String), String> {
+    let background_result = match self
+      .open_mobile_member_session(app, member_key, true)
+      .await
+    {
+      Ok((view_instance_id, switch_seq, uuid)) => {
+        match self
+          .wait_mobile_page_commit(member_key, switch_seq, view_instance_id)
+          .await
+        {
+          Ok(()) => Ok((view_instance_id, switch_seq, uuid)),
+          Err(e) => Err(e),
+        }
+      }
+      Err(e) => Err(e),
+    };
+    match background_result {
+      Ok(ready) => Ok(ready),
+      Err(background_err) => {
+        tracing::warn!(
+          "mobile group member session background open failed ({}), falling back to foreground",
+          background_err
+        );
+        let (view_instance_id, switch_seq, uuid) =
+          self.open_mobile_member_session(app, member_key, false).await?;
+        self
+          .wait_mobile_page_commit(member_key, switch_seq, view_instance_id)
+          .await?;
+        Ok((view_instance_id, switch_seq, uuid))
+      }
+    }
   }
 
   #[cfg(not(desktop))]
@@ -13809,8 +13885,9 @@ impl SessionManager {
       return None;
     }
 
+    // 0.2.9：打开 + 等就绪带前台回落（open_mobile_member_session_ready）。
     let (view_instance_id, switch_seq, uuid) = match self
-      .open_mobile_member_session(app, member_key)
+      .open_mobile_member_session_ready(app, member_key)
       .await
     {
       Ok(v) => v,
@@ -13829,23 +13906,6 @@ impl SessionManager {
         return None;
       }
     };
-    if let Err(err) = self
-      .wait_mobile_page_commit(member_key, switch_seq, view_instance_id)
-      .await
-    {
-      self
-        .update_group_message_state(
-          app,
-          group_id,
-          msg_id,
-          GroupReplyStatus::Error,
-          Some(String::new()),
-          Some(Some(err)),
-          true,
-        )
-        .await;
-      return None;
-    }
 
     // 线程绑定：已有记录且与当前页不同时跳过去，重新等页面就绪；
     // 没有记录就跳过这步，在当前会话里直接发。

@@ -176,6 +176,25 @@ object AccountSessionCoordinator {
         ch.send(obj)
     }
 
+    // 0.2.9：与 emitPageCommitVisible 完全同构的第二就绪信号。
+    // 后台 WebView 不可见时 onPageCommitVisible 不触发，onPageFinished 兜底。
+    fun emitPageLoadFinished(spec: AndroidAccountSessionSpec, url: String) {
+        val ch = synchronized(lock) {
+            if (!isCurrent(spec.switchSeq, spec.viewInstanceId)) return
+            eventChannel
+        } ?: return
+
+        val obj = JSObject().apply {
+            put("kind", "pageLoadFinished")
+            put("providerId", spec.providerId)
+            put("uuid", spec.uuid)
+            put("switchSeq", spec.switchSeq)
+            put("viewInstanceId", spec.viewInstanceId)
+            put("url", url)
+        }
+        ch.send(obj)
+    }
+
     fun emitIdentityDetected(
         spec: AndroidAccountSessionSpec,
         identity: String,
