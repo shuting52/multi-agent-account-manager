@@ -116,7 +116,20 @@ jobs:
       - name: Ensure extractNativeLibs=true (38MB 重压包可安装)
         run: |
           MANIFEST=src-tauri/gen/android/app/src/main/AndroidManifest.xml
-          sed -i 's/android:extractNativeLibs="false"/android:extractNativeLibs="true"/' "$MANIFEST"
+          python3 - "$MANIFEST" <<'EOF'
+          import re, sys
+          p = sys.argv[1]
+          s = open(p).read()
+          if 'android:extractNativeLibs="true"' in s:
+              pass
+          elif 'android:extractNativeLibs="false"' in s:
+              s = s.replace('android:extractNativeLibs="false"', 'android:extractNativeLibs="true"')
+          else:
+              s2, n = re.subn(r'(<application\b[^>]*?)>', r'\1 android:extractNativeLibs="true">', s, count=1)
+              assert n == 1, "no <application> tag found"
+              s = s2
+          open(p, "w").write(s)
+          EOF
           grep -q 'android:extractNativeLibs="true"' "$MANIFEST"
       - name: Build test APK
         if: env.APK_VARIANT == 'debug'
