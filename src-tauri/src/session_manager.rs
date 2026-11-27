@@ -13695,11 +13695,8 @@ impl SessionManager {
     };
     match background_result {
       Ok(ready) => Ok(ready),
-      Err(background_err) => {
-        tracing::warn!(
-          "mobile group member session background open failed ({}), falling back to foreground",
-          background_err
-        );
+      Err(_background_err) => {
+        // 后台打不开：不直接报错，改前台打开再等一次。
         let (view_instance_id, switch_seq, uuid) =
           self.open_mobile_member_session(app, member_key, false).await?;
         self
@@ -13886,7 +13883,7 @@ impl SessionManager {
     }
 
     // 0.2.9：打开 + 等就绪带前台回落（open_mobile_member_session_ready）。
-    let (view_instance_id, switch_seq, uuid) = match self
+    let (view_instance_id, _switch_seq, uuid) = match self
       .open_mobile_member_session_ready(app, member_key)
       .await
     {
