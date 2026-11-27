@@ -146,6 +146,7 @@ const PROVIDER_LOGOS: Record<string, ProviderLogoSpec> = {
   dola: { src: "/logos/dola.png", fullBleed: true },
   workbuddy: { src: "/logos/workbuddy.jpg", fullBleed: true },
   wabi: { src: "/logos/wabi.png", fullBleed: true },
+  deepseek: { src: "/logos/deepseek.png", fullBleed: true },
 };
 
 const GROUP_SKILL_PRESETS: Array<Omit<GroupSharedSkill, "id" | "enabled">> = [
@@ -307,6 +308,9 @@ let busy = false;
 let viewMode: "provider" | "groups" = "provider";
 // 0.2.8「更多平台」收纳区开关（默认收起），只影响移动端顶栏。
 let moreProvidersOpen = false;
+// 0.2.10 平台选择搜索词 + 是否展开全部（搜的时候忽略收纳）。
+let moreProvidersQuery = "";
+let moreProvidersShowAll = false;
 // 0.2.8 群聊顶部收纳区：默认收起，只留一行标题 + 展开开关。
 let groupHeaderExpanded = false;
 let lastGroupListScroll = 0;
@@ -3218,6 +3222,28 @@ function renderGroupRightStage(state: ManagerSnapshot): string {
         </div>
   `;
 
+  // 0.2.10：动作行（新话题 / 共享上下文 & 技能 / 编辑成员 / 清空记录）挪到输入区，收起顶栏时也能点。
+  const composerActionsHtml = `
+      <div class="group-composer-actions">
+        ${newTopicConfirmGroupId === activeGroup.id
+          ? `
+            <div class="new-topic-confirm">
+              <span class="new-topic-confirm-label">开启新话题：</span>
+              <button id="group-new-topic-keep-btn" class="btn primary" type="button" title="清空记录并让网页成员各自新开对话，保留共享上下文与技能">保留共享上下文</button>
+              <button id="group-new-topic-clean-btn" class="btn" type="button" title="清空记录、共享上下文，网页成员各自新开对话（技能与角色保留）">全部清空</button>
+              <button id="group-new-topic-cancel-btn" class="btn" type="button">取消</button>
+            </div>
+          `
+          : `
+        <button id="group-new-topic-btn" class="btn" type="button" title="清空记录并让所有网页成员新开原生对话，开始一个干净的话题">新话题</button>
+        ${canPinRound ? `<button id="group-pin-round-btn" class="btn knowledge-btn" type="button" title="将最近一轮各成员完成回复浓缩追加至共享上下文">${ICON_PIN}<span>沉淀本轮结论</span></button>` : ""}
+        <button id="group-knowledge-btn" class="btn knowledge-btn" type="button">共享上下文 &amp; 技能${knowledgeCount > 0 ? `<span class="count-badge">${knowledgeCount}</span>` : ""}</button>
+        <button id="group-edit-members-btn" class="btn" type="button">编辑成员</button>
+        <button id="group-clear-msgs-btn" class="btn" type="button" ${activeGroup.messages.length === 0 ? "disabled" : ""}>清空记录</button>
+          `}
+      </div>
+  `;
+
   // 0.2.8：群聊顶部收纳区（默认收起）：标题 + 成员卡片 + 模式/提及行只在展开时渲染。
   const headerExpandedHtml = groupHeaderExpanded
     ? `
@@ -3264,23 +3290,6 @@ function renderGroupRightStage(state: ManagerSnapshot): string {
               .join("")}
           </div>
         </div>
-        <div class="group-header-actions">
-          ${newTopicConfirmGroupId === activeGroup.id
-            ? `
-              <div class="new-topic-confirm">
-                <span class="new-topic-confirm-label">开启新话题：</span>
-                <button id="group-new-topic-keep-btn" class="btn primary" type="button" title="清空记录并让网页成员各自新开对话，保留共享上下文与技能">保留共享上下文</button>
-                <button id="group-new-topic-clean-btn" class="btn" type="button" title="清空记录、共享上下文，网页成员各自新开对话（技能与角色保留）">全部清空</button>
-                <button id="group-new-topic-cancel-btn" class="btn" type="button">取消</button>
-              </div>
-            `
-            : `
-          <button id="group-new-topic-btn" class="btn" type="button" title="清空记录并让所有网页成员新开原生对话，开始一个干净的话题">新话题</button>
-          ${canPinRound ? `<button id="group-pin-round-btn" class="btn knowledge-btn" type="button" title="将最近一轮各成员完成回复浓缩追加至共享上下文">${ICON_PIN}<span>沉淀本轮结论</span></button>` : ""}
-          <button id="group-knowledge-btn" class="btn knowledge-btn" type="button">共享上下文 &amp; 技能${knowledgeCount > 0 ? `<span class="count-badge">${knowledgeCount}</span>` : ""}</button>
-          <button id="group-edit-members-btn" class="btn" type="button">编辑成员</button>
-          <button id="group-clear-msgs-btn" class="btn" type="button" ${activeGroup.messages.length === 0 ? "disabled" : ""}>清空记录</button>
-            `}
         </div>
       </div>
         <div class="group-target-chips grouped">
@@ -3344,7 +3353,8 @@ function renderGroupRightStage(state: ManagerSnapshot): string {
   return `
     <main class="group-chat-stage">
       <div class="group-header-toggle-bar">
-        <button id="group-header-toggle-btn" class="group-header-toggle-btn" type="button" aria-expanded="${groupHeaderExpanded}">
+        <div class="group-header-grip" aria-hidden="true"></div>
+        <button id="group-header-toggle-btn" class="group-header-toggle-btn" type="button" aria-expanded="${groupHeaderExpanded}" title="点一下展开/收起，上下拖动也可切换">
           <span class="group-header-toggle-title">${escapeHtml(activeGroup.name)} \u00b7 ${activeGroup.members.length} 位成员 \u00b7 ${workflowMode === "parallel" ? "并行" : workflowMode === "review" ? "评审流" : "A2A接力"}</span>
           <span class="group-header-toggle-icon">${groupHeaderExpanded ? "\u25b4 收起" : "\u25be 展开"}</span>
         </button>
@@ -3354,6 +3364,7 @@ function renderGroupRightStage(state: ManagerSnapshot): string {
       <div class="group-messages">${msgsHtml}</div>
       <div class="group-composer">
         <div id="group-target-hint" class="group-composer-hint">${escapeHtml(targetHint)}</div>
+        ${composerActionsHtml}
         <div class="group-input-wrap">
           <div id="group-mention-menu" class="group-mention-menu" hidden></div>
           <div class="group-input-row">
@@ -3396,6 +3407,7 @@ function render(): void {
     "ext-agent-args-input",
     "ext-agent-workdir-input",
     "group-chat-input",
+    "more-providers-search-input",
   ]);
   // Sakuga 输入框的 inner input 藏在 shadow DOM 里（open 模式可读），光标位置从那里取。
   const focusedSakugaInner =
@@ -3425,6 +3437,22 @@ function render(): void {
   const isGroupsView = viewMode === "groups";
   const anyGroupNeedsAuth = snapshot.groupChats.some(groupHasNeedsAuth);
 
+  // 0.2.10 平台选择搜索 + 收纳：按名字/简称/英文 id 子串筛；没搜时默认只露前 5 个，点一下展开全部。
+  const moreProvidersQueryNorm = moreProvidersQuery.trim().toLowerCase();
+  const moreProvidersFiltered = snapshot.providers.filter(
+    (p) =>
+      moreProvidersQueryNorm === "" ||
+      p.name.toLowerCase().includes(moreProvidersQueryNorm) ||
+      p.shortName.toLowerCase().includes(moreProvidersQueryNorm) ||
+      p.id.toLowerCase().includes(moreProvidersQueryNorm),
+  );
+  const moreProvidersCollapsed =
+    moreProvidersQueryNorm === "" && !moreProvidersShowAll && moreProvidersFiltered.length > 5;
+  const moreProvidersVisible = moreProvidersCollapsed
+    ? moreProvidersFiltered.slice(0, 5)
+    : moreProvidersFiltered;
+  const moreProvidersHiddenCount = moreProvidersFiltered.length - moreProvidersVisible.length;
+
   if (isMobile) {
     root.innerHTML = `
       <div class="mobile-shell">
@@ -3440,12 +3468,15 @@ function render(): void {
         ${moreProvidersOpen ? `
         <div class="more-providers-panel">
           <div class="more-providers-title">群聊 / 选择平台添加账号</div>
+          <div class="more-providers-search">
+            <input id="more-providers-search-input" class="more-providers-search-input" type="search" placeholder="搜索平台，如 DeepSeek / 豆包…" value="${escapeHtml(moreProvidersQuery)}" autocomplete="off" />
+          </div>
           <button class="more-provider-row" data-open-groups type="button">
             <svg class="more-provider-logo" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#8f8df7"/><circle cx="9" cy="9.5" r="2.8" fill="#fff"/><path d="M4 17.5c.7-2.6 2.6-4 5-4s4.3 1.4 5 4" stroke="#fff" stroke-width="1.7" fill="none" stroke-linecap="round"/><circle cx="16.5" cy="10" r="2.2" fill="#fff" opacity="0.85"/><path d="M13.5 17.5c.6-2 2-3 3.8-3 1.5 0 2.7.8 3.2 2.2" stroke="#fff" stroke-width="1.5" fill="none" stroke-linecap="round" opacity="0.85"/></svg>
             <span class="more-provider-name">群聊</span>
             <span class="more-provider-go">进入</span>
           </button>
-          ${snapshot.providers
+          ${moreProvidersVisible
             .map(
               (p) => `
             <button class="more-provider-row" data-more-provider="${escapeHtml(p.id)}" type="button">
@@ -3455,6 +3486,12 @@ function render(): void {
             </button>`
             )
             .join("")}
+          ${moreProvidersQueryNorm !== "" && moreProvidersFiltered.length === 0 ? `
+          <div class="more-providers-empty">没有找到「${escapeHtml(moreProvidersQuery.trim())}」</div>` : ""}
+          ${moreProvidersCollapsed ? `
+          <button id="more-providers-show-all-btn" class="more-providers-toggle-row" type="button">展开全部 · 还有 ${moreProvidersHiddenCount} 个平台 ▾</button>` : ""}
+          ${moreProvidersQueryNorm === "" && moreProvidersShowAll && snapshot.providers.length > 5 ? `
+          <button id="more-providers-show-all-btn" class="more-providers-toggle-row" type="button">收起 ▴</button>` : ""}
         </div>` : ""}
         <div class="middle-column" style="width:100%;min-width:0;flex:1;border-right:none;">
           ${isGroupsView ? renderGroupMiddleContent(snapshot, provider) : renderMiddleContent(snapshot, provider)}
@@ -3607,6 +3644,19 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
   // 0.2.8「更多平台」收纳区：点按钮展开选择框，点一行就切到该平台并进新增账号流程。
   document.querySelector("#more-providers-btn")?.addEventListener("click", () => {
     moreProvidersOpen = !moreProvidersOpen;
+    if (!moreProvidersOpen) {
+      moreProvidersQuery = "";
+      moreProvidersShowAll = false;
+    }
+    render();
+  });
+  // 0.2.10 平台搜索：输入即筛，焦点与光标由 render 的 preservedInputIds 保住。
+  document.querySelector<HTMLInputElement>("#more-providers-search-input")?.addEventListener("input", (ev) => {
+    moreProvidersQuery = (ev.target as HTMLInputElement).value;
+    render();
+  });
+  document.querySelector("#more-providers-show-all-btn")?.addEventListener("click", () => {
+    moreProvidersShowAll = !moreProvidersShowAll;
     render();
   });
   document.querySelectorAll<HTMLElement>("[data-more-provider]").forEach((btn) => {
@@ -3614,6 +3664,8 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
       const pid = btn.dataset.moreProvider as ProviderId;
       if (!pid) return;
       moreProvidersOpen = false;
+      moreProvidersQuery = "";
+      moreProvidersShowAll = false;
       await switchProvider(pid);
       await setModal({
         kind: "add",
@@ -3628,6 +3680,8 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
   // 0.2.9：更多平台列表顶部的「群聊」行，点一下收起面板并打开群聊页。
   document.querySelector("[data-open-groups]")?.addEventListener("click", () => {
     moreProvidersOpen = false;
+    moreProvidersQuery = "";
+    moreProvidersShowAll = false;
     void switchToGroups();
   });
 
@@ -3757,10 +3811,52 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
     }
   });
 
-  // 0.2.8 群聊顶部收纳：点一下展开/收起成员卡片 + 模式/提及行。
-  document.querySelector("#group-header-toggle-btn")?.addEventListener("click", () => {
-    groupHeaderExpanded = !groupHeaderExpanded;
-    render();
+  // 0.2.10 群聊顶部收纳：点一下展开/收起；上下拖动（>24px）也可切换，拖完聊天区随之全貌展开/收回。
+  const headerToggleBtn = document.querySelector<HTMLElement>("#group-header-toggle-btn");
+  let headerDragStartY: number | null = null;
+  let headerDragDy = 0;
+  let headerDragMoved = false;
+  headerToggleBtn?.addEventListener("pointerdown", (ev) => {
+    headerDragStartY = ev.clientY;
+    headerDragDy = 0;
+    headerDragMoved = false;
+    headerToggleBtn.classList.add("grabbing");
+    try {
+      headerToggleBtn.setPointerCapture(ev.pointerId);
+    } catch {
+      /* 旧机型不支持 pointer capture，拖动照常走 pointermove */
+    }
+  });
+  headerToggleBtn?.addEventListener("pointermove", (ev) => {
+    if (headerDragStartY === null) return;
+    headerDragDy = ev.clientY - headerDragStartY;
+    if (Math.abs(headerDragDy) > 8) headerDragMoved = true;
+  });
+  const finishHeaderDrag = () => {
+    if (headerDragStartY === null) return;
+    headerToggleBtn?.classList.remove("grabbing");
+    if (headerDragMoved) {
+      if (headerDragDy < -24 && groupHeaderExpanded) {
+        groupHeaderExpanded = false;
+        render();
+      } else if (headerDragDy > 24 && !groupHeaderExpanded) {
+        groupHeaderExpanded = true;
+        render();
+      }
+    } else {
+      groupHeaderExpanded = !groupHeaderExpanded;
+      render();
+    }
+    headerDragStartY = null;
+    headerDragDy = 0;
+    headerDragMoved = false;
+  };
+  headerToggleBtn?.addEventListener("pointerup", finishHeaderDrag);
+  headerToggleBtn?.addEventListener("pointercancel", () => {
+    headerDragStartY = null;
+    headerDragDy = 0;
+    headerDragMoved = false;
+    headerToggleBtn?.classList.remove("grabbing");
   });
 
   document.querySelector("#group-clear-msgs-btn")?.addEventListener("click", async () => {

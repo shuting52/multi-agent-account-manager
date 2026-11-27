@@ -46,6 +46,10 @@ impl ProviderId {
     Self("wabi".to_string())
   }
 
+  pub fn deepseek() -> Self {
+    Self("deepseek".to_string())
+  }
+
   pub fn api() -> Self {
     Self("api".to_string())
   }
@@ -98,6 +102,10 @@ impl ProviderId {
     self.0 == "wabi"
   }
 
+  pub fn is_deepseek(&self) -> bool {
+    self.0 == "deepseek"
+  }
+
   pub fn is_api(&self) -> bool {
     self.0 == "api"
   }
@@ -122,6 +130,7 @@ impl ProviderId {
       || self.is_dola()
       || self.is_workbuddy()
       || self.is_wabi()
+      || self.is_deepseek()
   }
 
   pub fn parse(value: &str) -> Option<Self> {
@@ -136,6 +145,7 @@ impl ProviderId {
       || clean == "dola"
       || clean == "workbuddy"
       || clean == "wabi"
+      || clean == "deepseek"
       || clean == "api"
       || clean == "cli"
     {
@@ -389,6 +399,24 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
         "wabi.ai".to_string(),
         "appleid.apple.com".to_string(),
         "idmsa.apple.com".to_string(),
+      ],
+    },
+    ProviderSpec {
+      info: ProviderInfo {
+        id: ProviderId::deepseek(),
+        name: "DeepSeek".to_string(),
+        short_name: "DeepSeek".to_string(),
+        enabled: true,
+        status_text: "已启用".to_string(),
+        entry_url: "https://chat.deepseek.com/".to_string(),
+        homepage_url: "https://chat.deepseek.com/".to_string(),
+        callback_origins: vec!["https://chat.deepseek.com".to_string()],
+        verified_methods: vec!["phone".to_string(), "email".to_string()],
+      },
+      allowed_hosts: vec![
+        "chat.deepseek.com".to_string(),
+        "deepseek.com".to_string(),
+        "api.deepseek.com".to_string(),
       ],
     },
   ]

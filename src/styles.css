@@ -3145,6 +3145,27 @@ body,
   flex-shrink: 0;
 }
 
+/* ── 0.2.10 输入区动作行：新话题 / 共享上下文 & 技能 / 编辑成员 / 清空记录 ── */
+.group-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 0;
+}
+
+.group-composer-actions::-webkit-scrollbar {
+  display: none;
+}
+
+.group-composer-actions .btn {
+  flex-shrink: 0;
+  padding: 5px 11px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .group-target-chips {
   display: flex;
   align-items: center;
@@ -4727,6 +4748,26 @@ body,
   white-space: nowrap;
 }
 
+/* ── 0.2.10 顶栏拖动把手：中间一道小横杠，上下拖动切换展开/收起 ── */
+.group-header-grip {
+  width: 40px;
+  height: 4px;
+  margin: 0 auto 5px;
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+
+.group-header-toggle-btn {
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.group-header-toggle-btn.grabbing {
+  cursor: grabbing;
+}
+
 /* ── 0.2.8「更多平台」收纳区（移动端顶栏）── */
 .mobile-tabs {
   display: flex;
@@ -4812,6 +4853,48 @@ body,
   font-weight: 650;
   color: var(--primary);
   flex-shrink: 0;
+}
+
+/* ── 0.2.10 平台搜索 + 收纳 ── */
+.more-providers-search {
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.more-providers-search-input {
+  width: 100%;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border-strong);
+  background: var(--stage-bg);
+  color: var(--text-main);
+  font-size: 13px;
+  outline: none;
+}
+
+.more-providers-search-input:focus {
+  border-color: var(--primary);
+}
+
+.more-providers-toggle-row {
+  display: block;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  font-size: 12.5px;
+  font-weight: 650;
+  text-align: center;
+  cursor: pointer;
+}
+
+.more-providers-empty {
+  padding: 12px;
+  font-size: 13px;
+  color: var(--text-sub);
+  text-align: center;
 }
 
 /* ── 0.2.6 sakuga-tabs 窄屏横向滚动，不截断（不改 vendored 的 tabs.js）── */
