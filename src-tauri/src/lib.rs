@@ -70,6 +70,8 @@ async fn rename_account(
   alias: String,
   proxy_url: Option<String>,
   timezone: Option<String>,
+  invite_code: Option<String>,
+  invite_remaining: Option<u32>,
 ) -> Result<ManagerSnapshot, String> {
   mgr
     .update_account_settings(
@@ -79,6 +81,8 @@ async fn rename_account(
       &alias,
       proxy_url.as_deref(),
       timezone.as_deref(),
+      invite_code.as_deref(),
+      invite_remaining,
     )
     .await
 }

@@ -59,6 +59,8 @@ export interface AccountRecord {
   quotaText: string | null;
   quotaPercent: number | null;
   quotaDetail: QuotaDetail | null;
+  inviteCode: string | null;
+  inviteRemaining: number | null;
   authState: AuthState;
   cookieExpiresAtMs: number | null;
   cookieSessionOnly: boolean;

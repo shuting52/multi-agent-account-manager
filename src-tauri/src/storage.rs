@@ -88,6 +88,15 @@ pub struct QuotaDetail {
   pub extra_used_percent: Option<u8>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ReferralInfo {
+  #[serde(default)]
+  pub code: String,
+  #[serde(default)]
+  pub remaining: Option<u32>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthState {
@@ -118,6 +127,10 @@ pub struct AccountRecord {
   pub quota_percent: Option<u8>,
   #[serde(default)]
   pub quota_detail: Option<QuotaDetail>,
+  #[serde(default)]
+  pub invite_code: Option<String>,
+  #[serde(default)]
+  pub invite_remaining: Option<u32>,
   #[serde(default)]
   pub auth_state: AuthState,
   #[serde(default)]

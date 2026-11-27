@@ -1024,6 +1024,29 @@ body,
   font-weight: 600;
 }
 
+.quota-invite {
+  font-size: 11px;
+  line-height: 1.25;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid #dbe4f0;
+  background: #f8fafc;
+  color: #334155;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 0 1 auto;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.quota-invite.copied {
+  background: #dcfce7;
+  border-color: #86efac;
+  color: #166534;
+}
+
 .quota-bar-track {
   flex: 1;
   min-width: 36px;
@@ -2116,6 +2139,22 @@ body,
   gap: 6px;
 }
 
+.invite-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.invite-input-row > sakuga-input:first-child {
+  flex: 1.4;
+  min-width: 0;
+}
+
+.invite-input-row > sakuga-input:last-child {
+  flex: 1;
+  min-width: 0;
+}
+
 .proxy-input-row .modal-input {
   flex: 1;
   min-width: 0;
@@ -2481,6 +2520,18 @@ body,
 :root[data-theme="dark"] .quota-extra-pill {
   background: rgba(59, 130, 246, 0.2);
   color: #93c5fd;
+}
+
+:root[data-theme="dark"] .quota-invite {
+  background: rgba(148, 163, 184, 0.14);
+  border-color: rgba(148, 163, 184, 0.35);
+  color: #cbd5e1;
+}
+
+:root[data-theme="dark"] .quota-invite.copied {
+  background: rgba(34, 197, 94, 0.22);
+  border-color: rgba(74, 222, 128, 0.5);
+  color: #86efac;
 }
 
 :root[data-theme="dark"] .quota-bar-track,

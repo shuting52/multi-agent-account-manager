@@ -202,6 +202,7 @@ object AccountSessionCoordinator {
         quotaText: String?,
         quotaPercent: Int?,
         quotaDetailJson: String?,
+        referralJson: String?,
     ) {
         val ch = synchronized(lock) {
             if (!isCurrent(spec.switchSeq, spec.viewInstanceId)) return
@@ -223,6 +224,7 @@ object AccountSessionCoordinator {
             if (!quotaText.isNullOrEmpty()) put("quotaText", quotaText)
             if (quotaPercent != null) put("quotaPercent", quotaPercent)
             if (!quotaDetailJson.isNullOrEmpty()) put("quotaDetailJson", quotaDetailJson)
+            if (!referralJson.isNullOrEmpty()) put("referralJson", referralJson)
         }
         ch.send(obj)
     }

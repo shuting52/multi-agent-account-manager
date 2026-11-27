@@ -15,7 +15,7 @@ use crate::storage::{
   detect_conflicts, load_or_migrate_store, normalize_uuid, now_ms, save_store_atomic, AccountKey,
   AccountRecord, AccountsStoreFile, AppSettings, AuthState, ConflictItem, ExternalAgentKind,
   ExternalAgentRecord, GroupChatRecord, GroupMemberRole, GroupReplyStatus, GroupSharedSkill,
-  GroupWorkflowMode, QuotaDetail,
+  GroupWorkflowMode, QuotaDetail, ReferralInfo,
 };
 use serde::Serialize;
 #[cfg(desktop)]
@@ -210,6 +210,55 @@ const LOGIN_CAPTURE_INIT_JS: &str = r#"(() => {
         ? Math.max(0, Math.min(100, 100 - detail.planUsedPercent))
         : null;
       setQuota(detail.planValue || detail.planLabel, rem);
+    };
+    // 0.2.13：邀请码被动嗅探。额度同步只拉 /api/profile、/api/billing/summary
+    // 这类用量接口，邀请码不在里面；邀请码只在用户打开邀请页时才经过页面
+    // 流量，所以这里只在拦截到的 JSON 里认邀请码形状的字段并记下来，没出
+    // 现就靠账号设置里手动填写。
+    const saveReferral = (code, remaining) => {
+      if (typeof code !== 'string') return;
+      const clean = code.trim().toUpperCase();
+      if (!/^[A-Z0-9]{4,12}$/.test(clean)) return;
+      const rem = typeof remaining === 'number' && Number.isFinite(remaining) && remaining >= 0 && remaining <= 1000
+        ? Math.floor(remaining) : null;
+      const obj = { code: clean, remaining: rem };
+      window.__maamReferral = obj;
+      try { localStorage.setItem('__maam_cached_referral__', JSON.stringify(obj)); } catch (_) {}
+    };
+    const referralOut = () => {
+      try {
+        if (window.__maamReferral && window.__maamReferral.code) return window.__maamReferral;
+        const cached = localStorage.getItem('__maam_cached_referral__');
+        if (cached) {
+          const d = JSON.parse(cached);
+          if (d && d.code) { window.__maamReferral = d; return d; }
+        }
+      } catch (_) {}
+      return window.__maamReferral || null;
+    };
+    const recordReferralFromNode = (node) => {
+      if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+      const CODE_KEYS = ['referralCode', 'referral_code', 'inviteCode', 'invite_code', 'referralcode', 'invitecode'];
+      let code = null;
+      for (const k of CODE_KEYS) {
+        if (typeof node[k] === 'string' && /^[A-Z0-9]{4,12}$/i.test(node[k].trim())) { code = node[k]; break; }
+      }
+      if (!code) return;
+      const REM_KEYS = ['invitesRemaining', 'invites_remaining', 'remainingInvites', 'remaining_invites', 'invitesLeft', 'invites_left', 'referralRemaining', 'referralsRemaining', 'usesRemaining', 'uses_remaining', 'remainingUses', 'remaining_uses'];
+      let rem = null;
+      for (const k of REM_KEYS) {
+        if (typeof node[k] === 'number' && Number.isFinite(node[k])) { rem = node[k]; break; }
+      }
+      if (rem === null) {
+        const USED_KEYS = ['invitesUsed', 'invites_used', 'usedInvites', 'used_invites', 'referralsUsed', 'usedCount', 'used_count'];
+        const TOTAL_KEYS = ['totalInvites', 'total_invites', 'inviteLimit', 'invite_limit', 'maxInvites', 'max_invites', 'totalCount', 'total_count'];
+        let used = null;
+        let total = null;
+        for (const k of USED_KEYS) { if (typeof node[k] === 'number' && Number.isFinite(node[k])) { used = node[k]; break; } }
+        for (const k of TOTAL_KEYS) { if (typeof node[k] === 'number' && Number.isFinite(node[k])) { total = node[k]; break; } }
+        if (used !== null && total !== null && total >= used) rem = total - used;
+      }
+      saveReferral(code, rem);
     };
     const formatHarkReset = (iso) => {
       if (!iso || typeof iso !== 'string') return null;
@@ -743,6 +792,7 @@ const LOGIN_CAPTURE_INIT_JS: &str = r#"(() => {
           recordApiEmail(node[ek]);
         }
       }
+      recordReferralFromNode(node);
       const hasUserHint =
         'user_id' in node || 'userId' in node || 'viewer_id' in node || 'viewerId' in node ||
         'profile_pic_url' in node || 'profilePictureUrl' in node || 'avatar_url' in node || 'avatarUrl' in node ||
@@ -1690,6 +1740,7 @@ const IDENTITY_PROBE_JS: &str = r#"(() => {
       quotaText: quota.text || '',
       quotaPct: quota.pct,
       quotaDetail: quota.detail || null,
+      referral: referralOut(),
       pendingHotkey
     });
   } catch (_) {
@@ -5041,6 +5092,8 @@ impl SessionManager {
     raw_alias: &str,
     raw_proxy_url: Option<&str>,
     raw_timezone: Option<&str>,
+    raw_invite_code: Option<&str>,
+    raw_invite_remaining: Option<u32>,
   ) -> Result<ManagerSnapshot, String> {
     let provider_id = ProviderId::parse(raw_provider).ok_or_else(|| "无效的服务标识".to_string())?;
     let uuid = normalize_uuid(raw_uuid).ok_or_else(|| "无效的账号 UUID".to_string())?;
@@ -5048,6 +5101,8 @@ impl SessionManager {
     if alias.is_empty()
       && raw_timezone.is_none()
       && (raw_proxy_url.is_none() || !platform::SUPPORTS_ACCOUNT_PROXY)
+      && raw_invite_code.is_none()
+      && raw_invite_remaining.is_none()
     {
       return Err("账号别名不能为空".to_string());
     }
@@ -5073,6 +5128,33 @@ impl SessionManager {
     }
     if let Some(tz) = timezone_update {
       updated.timezone = tz;
+    }
+    // 0.2.13：邀请码手动填写。码与剩余次数成对保存：码为空就两个都清掉；
+    // 只传剩余次数且已有码时只改剩余次数。
+    if let Some(code_raw) = raw_invite_code {
+      let clean = code_raw.trim().to_uppercase();
+      if clean.is_empty() {
+        updated.invite_code = None;
+        updated.invite_remaining = None;
+      } else {
+        if clean.len() > 12 || !clean.chars().all(|c| c.is_ascii_alphanumeric()) {
+          return Err("邀请码格式不对，应为 4-12 位字母或数字".to_string());
+        }
+        if let Some(rem) = raw_invite_remaining {
+          if rem > 1000 {
+            return Err("剩余次数最多填 1000".to_string());
+          }
+        }
+        updated.invite_code = Some(clean);
+        updated.invite_remaining = raw_invite_remaining;
+      }
+    } else if let Some(rem) = raw_invite_remaining {
+      if rem > 1000 {
+        return Err("剩余次数最多填 1000".to_string());
+      }
+      if updated.invite_code.is_some() {
+        updated.invite_remaining = Some(rem);
+      }
     }
     let proxy_changed = updated.proxy_url != locked.store.accounts[index].proxy_url;
     let timezone_changed = updated.timezone != locked.store.accounts[index].timezone;
@@ -6927,6 +7009,7 @@ impl SessionManager {
                     },
                     probe.quota_pct,
                     probe.quota_detail,
+                    probe.referral,
                   )
                   .await;
                 mgr
@@ -8726,6 +8809,7 @@ impl SessionManager {
         quota_text,
         quota_percent,
         quota_detail_json,
+        referral_json,
       } => {
         let Some(pid) = ProviderId::parse(&provider_id) else {
           return;
@@ -8737,6 +8821,10 @@ impl SessionManager {
         let parsed_detail = quota_detail_json
           .as_deref()
           .and_then(|s| serde_json::from_str::<QuotaDetail>(s).ok());
+        let parsed_referral = referral_json
+          .as_deref()
+          .and_then(|s| serde_json::from_str::<ReferralInfo>(s).ok())
+          .filter(|r| !r.code.trim().is_empty());
         self
           .apply_detected_metadata(
             app,
@@ -8751,6 +8839,7 @@ impl SessionManager {
             quota_text,
             quota_percent,
             parsed_detail,
+            parsed_referral,
           )
           .await;
       }
@@ -9158,6 +9247,7 @@ impl SessionManager {
               None,
               None,
               None,
+              None,
             )
             .await;
           break;
@@ -9356,6 +9446,7 @@ impl SessionManager {
               },
               probe.quota_pct,
               probe.quota_detail,
+              probe.referral,
             )
             .await;
           if just_authenticated || needs_cookie_check {
@@ -9497,6 +9588,11 @@ impl SessionManager {
       .filter(|v| !v.is_null())
       .and_then(|v| serde_json::from_value::<QuotaDetail>(v.clone()).ok())
       .filter(|d| !d.plan_label.trim().is_empty() || !d.plan_value.trim().is_empty());
+    let referral = val
+      .get("referral")
+      .filter(|v| !v.is_null())
+      .and_then(|v| serde_json::from_value::<ReferralInfo>(v.clone()).ok())
+      .filter(|r| !r.code.trim().is_empty());
     let pending_hotkey = val
       .get("pendingHotkey")
       .and_then(|v| v.as_u64())
@@ -9515,6 +9611,7 @@ impl SessionManager {
       quota_text,
       quota_pct,
       quota_detail,
+      referral,
       pending_hotkey,
     })
   }
@@ -9813,6 +9910,7 @@ impl SessionManager {
     quota_text_opt: Option<String>,
     quota_pct_opt: Option<u8>,
     quota_detail_opt: Option<QuotaDetail>,
+    referral_opt: Option<ReferralInfo>,
   ) -> (Option<ManagerSnapshot>, bool, bool, Option<String>) {
     if !Self::is_view_instance_valid(locked, key, view_instance_id) {
       return (None, false, false, None);
@@ -9875,6 +9973,32 @@ impl SessionManager {
       if target.quota_detail.as_ref() != Some(&detail) {
         target.quota_detail = Some(detail);
         changed = true;
+      }
+    }
+
+    // 0.2.13：探针嗅探到的邀请码只补空缺、不覆盖手动填写；同一码只刷新剩余次数。
+    if let Some(ref_info) = referral_opt {
+      let clean_code = ref_info.code.trim().to_uppercase();
+      if !clean_code.is_empty()
+        && clean_code.len() <= 12
+        && clean_code.chars().all(|c| c.is_ascii_alphanumeric())
+      {
+        match &target.invite_code {
+          None => {
+            target.invite_code = Some(clean_code);
+            target.invite_remaining = ref_info.remaining;
+            changed = true;
+          }
+          Some(existing) if existing.eq_ignore_ascii_case(&clean_code) => {
+            if let Some(rem) = ref_info.remaining {
+              if target.invite_remaining != Some(rem) {
+                target.invite_remaining = Some(rem);
+                changed = true;
+              }
+            }
+          }
+          _ => {}
+        }
       }
     }
 
@@ -9945,6 +10069,7 @@ impl SessionManager {
     quota_text_opt: Option<String>,
     quota_pct_opt: Option<u8>,
     quota_detail_opt: Option<QuotaDetail>,
+    referral_opt: Option<ReferralInfo>,
   ) -> (bool, bool) {
     let (snap_opt, became_authenticated, needs_cookie_check, fg_title) = {
       let mut locked = self.inner.lock().await;
@@ -9958,6 +10083,7 @@ impl SessionManager {
         quota_text_opt,
         quota_pct_opt,
         quota_detail_opt,
+        referral_opt,
       )
     };
 
@@ -14757,6 +14883,7 @@ struct DesktopProbeResult {
   quota_text: String,
   quota_pct: Option<u8>,
   quota_detail: Option<QuotaDetail>,
+  referral: Option<ReferralInfo>,
   pending_hotkey: Option<u8>,
 }
 

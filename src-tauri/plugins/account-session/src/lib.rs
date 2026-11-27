@@ -81,6 +81,8 @@ pub enum MobileSessionEvent {
     quota_percent: Option<u8>,
     #[serde(default)]
     quota_detail_json: Option<String>,
+    #[serde(default)]
+    referral_json: Option<String>,
   },
   #[serde(rename_all = "camelCase")]
   SessionFailed {

@@ -33,6 +33,8 @@ type AccountDraft = {
   draft: string;
   proxyDraft: string;
   timezoneDraft: string;
+  inviteCodeDraft: string;
+  inviteRemainingDraft: string;
   cookieDraft?: string;
   cookieImporting?: boolean;
   error?: string;
@@ -303,6 +305,7 @@ systemDarkQuery.addEventListener("change", () => {
 
 let snapshot: ManagerSnapshot | null = null;
 let modal: ModalMode = { kind: "none" };
+let copiedInviteUuid: string | null = null;
 let optimisticSwitching: AccountKey | null = null;
 let busy = false;
 let viewMode: "provider" | "groups" = "provider";
@@ -952,6 +955,7 @@ function formatCookieExpiry(acc: AccountRecord): CookieExpiryDisplay | null {
 }
 
 function renderQuotaDetailPanel(
+  acc: AccountRecord,
   detail: QuotaDetail,
   status: QuotaStatus,
   extraDepleted: boolean
@@ -980,15 +984,24 @@ function renderQuotaDetailPanel(
     .filter(Boolean)
     .join(" · ");
 
-  const metaHtml =
-    shortReset || shortExtra
-      ? `
+  const metaHtml = (() => {
+    const inviteCode = (acc.inviteCode ?? "").trim();
+    const inviteRemaining =
+      typeof acc.inviteRemaining === "number" ? acc.inviteRemaining : null;
+    const inviteText = inviteCode
+      ? `邀请码 ${inviteCode} · 剩余 ${inviteRemaining ?? "—"} 次`
+      : "邀请码 — · 剩余 —";
+    const inviteCopied =
+      copiedInviteUuid !== null && copiedInviteUuid === acc.uuid;
+    const inviteHtml = `<button class="quota-invite ${inviteCopied ? "copied" : ""}" data-invite-copy="${escapeHtml(acc.uuid)}" data-invite-code="${escapeHtml(inviteCode)}" type="button" title="点一下复制邀请码">${escapeHtml(inviteCopied ? "已复制 ✓" : inviteText)}</button>`;
+    return `
         <div class="quota-compact-meta">
           <span class="quota-sub-text" title="${escapeHtml(rawReset)}">${escapeHtml(shortReset)}</span>
+          ${inviteHtml}
           ${shortExtra ? `<span class="quota-extra-pill ${status}" title="${escapeHtml(fullExtraTitle)}">${escapeHtml(shortExtra)}</span>` : ""}
         </div>
-      `
-      : "";
+      `;
+  })();
 
   return `
     <div class="quota-compact-main">
@@ -1833,6 +1846,14 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
             ).join("")}
           </div>
           <div class="modal-hint">${platform === "windows" ? "通过 WebView2 原生接口按账号独立生效，留空则使用系统时区。" : "文档加载前注入该账号独立页面，支持夏令时，留空则使用系统时区。"}</div>
+          ${!creating ? `
+          <label class="modal-desc" for="modal-invite-code-input">邀请码（在 Muse 邀请页面查看自己的邀请码和剩余次数）</label>
+          <div class="invite-input-row">
+            <sakuga-input id="modal-invite-code-input" maxlength="12" label="邀请码" placeholder="例如 NGVFLN" value="${escapeHtml(modal.inviteCodeDraft)}" autocomplete="off" ${saving ? "disabled" : ""}></sakuga-input>
+            <sakuga-input id="modal-invite-remaining-input" maxlength="4" label="剩余次数" placeholder="剩余几次" value="${escapeHtml(modal.inviteRemainingDraft)}" autocomplete="off" inputmode="numeric" ${saving ? "disabled" : ""}></sakuga-input>
+          </div>
+          <div class="modal-hint">填好后卡片第二行会显示邀请码和剩余次数，点一下邀请码就能复制。留空则不显示。</div>
+          ` : ""}
           ${cookieInfo ? `<div class="cookie-detail-box ${cookieInfo.tone}" title="${escapeHtml(cookieInfo.tooltip)}"><span class="cookie-expiry-dot"></span><span>${escapeHtml(cookieInfo.detailText)}</span></div>` : ""}
           <div class="cookie-import-section">
             <label class="modal-desc" for="modal-cookie-import-input">${creating ? "导入 Cookie（可选，支持从 Chrome 等浏览器登录后粘贴）" : "导入 Cookie（支持从 Chrome 等浏览器登录后粘贴）"}</label>
@@ -2508,7 +2529,7 @@ function renderMiddleContent(state: ManagerSnapshot, provider: ProviderInfo): st
                 <button class="action-icon-btn danger" data-remove-uuid="${escapeHtml(acc.uuid)}" title="从本机移除" type="button">${ICON_TRASH}</button>
               </div>
             </div>
-            ${!isLoggedOut && !hasPageError && acc.quotaDetail ? renderQuotaDetailPanel(acc.quotaDetail, alertStatus, extraDepleted) : ""}
+            ${!isLoggedOut && !hasPageError && acc.quotaDetail ? renderQuotaDetailPanel(acc, acc.quotaDetail, alertStatus, extraDepleted) : ""}
             ${hasDetail && cookieInfo ? `<div class="cookie-expiry-line ${cookieInfo.tone}" title="${escapeHtml(cookieInfo.tooltip)}"><span class="cookie-expiry-dot"></span><span>${escapeHtml(cookieInfo.shortText)}</span></div>` : ""}
           </div>
         `;
@@ -3417,6 +3438,8 @@ function render(): void {
     "modal-alias-input",
     "modal-proxy-input",
     "modal-timezone-input",
+    "modal-invite-code-input",
+    "modal-invite-remaining-input",
     "modal-shortcut-input",
     "modal-group-name-input",
     "modal-group-context-input",
@@ -3698,6 +3721,8 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
         draft: "",
         proxyDraft: "",
         timezoneDraft: "",
+        inviteCodeDraft: "",
+        inviteRemainingDraft: "",
         cookieDraft: "",
       });
     });
@@ -4866,7 +4891,7 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
   });
 
   const openAddModal = async () => {
-    await setModal({ kind: "add", providerId: provider.id, draft: "", proxyDraft: "", timezoneDraft: "", cookieDraft: "" });
+    await setModal({ kind: "add", providerId: provider.id, draft: "", proxyDraft: "", timezoneDraft: "", inviteCodeDraft: "", inviteRemainingDraft: "", cookieDraft: "" });
   };
   document.querySelector("#add-account-btn")?.addEventListener("click", openAddModal);
   document.querySelector("#stage-add-btn")?.addEventListener("click", openAddModal);
@@ -5038,9 +5063,43 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
           draft: acc.autoAlias ? "" : acc.alias,
           proxyDraft: acc.proxyUrl ?? "",
           timezoneDraft: acc.timezone ?? "",
+          inviteCodeDraft: acc.inviteCode ?? "",
+          inviteRemainingDraft:
+            typeof acc.inviteRemaining === "number" ? String(acc.inviteRemaining) : "",
           cookieDraft: "",
         });
       }
+    });
+  });
+
+  document.querySelectorAll<HTMLElement>("[data-invite-copy]").forEach((btn) => {
+    btn.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      const code = (btn.dataset.inviteCode ?? "").trim();
+      if (!code) return;
+      const uuid = btn.dataset.inviteCopy ?? "";
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(code);
+        } else {
+          const ta = document.createElement("textarea");
+          ta.value = code;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+        }
+        copiedInviteUuid = uuid;
+        render();
+        window.setTimeout(() => {
+          if (copiedInviteUuid === uuid) {
+            copiedInviteUuid = null;
+            render();
+          }
+        }, 1500);
+      } catch (_) {}
     });
   });
 
@@ -5799,7 +5858,7 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
 
   document
     .querySelectorAll<HTMLInputElement>(
-      "#modal-alias-input, #modal-proxy-input, #modal-timezone-input, #modal-shortcut-input, #modal-group-name-input"
+      "#modal-alias-input, #modal-proxy-input, #modal-timezone-input, #modal-invite-code-input, #modal-invite-remaining-input, #modal-shortcut-input, #modal-group-name-input"
     )
     .forEach((input) => {
       input.addEventListener("input", () => {
@@ -5810,6 +5869,10 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
             document.querySelector("#proxy-test-result")?.remove();
           } else if (input.id === "modal-timezone-input") {
             modal.timezoneDraft = input.value;
+          } else if (input.id === "modal-invite-code-input") {
+            modal.inviteCodeDraft = input.value;
+          } else if (input.id === "modal-invite-remaining-input") {
+            modal.inviteRemainingDraft = input.value;
           } else {
             modal.draft = input.value;
           }
@@ -5886,6 +5949,15 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
       const alias = currentModal.draft.trim();
       const proxyUrl = supportsProxy ? currentModal.proxyDraft.trim() : undefined;
       const timezone = currentModal.timezoneDraft.trim();
+      const inviteCode = currentModal.inviteCodeDraft.trim();
+      const inviteRemainingRaw = currentModal.inviteRemainingDraft.trim();
+      const inviteRemaining =
+        inviteRemainingRaw === ""
+          ? null
+          : Math.min(
+              1000,
+              Math.max(0, Number.parseInt(inviteRemainingRaw, 10) || 0)
+            );
       currentModal.error = undefined;
       currentModal.saving = true;
       render();
@@ -5906,6 +5978,8 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
             alias,
             proxyUrl,
             timezone,
+            inviteCode,
+            inviteRemaining,
           });
       } finally {
         currentModal.saving = false;

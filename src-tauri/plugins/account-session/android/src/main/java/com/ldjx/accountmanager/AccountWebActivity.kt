@@ -1938,6 +1938,7 @@ class AccountWebActivity : AppCompatActivity() {
         val quotaText: String,
         val quotaPct: Int?,
         val quotaDetailJson: String,
+        val referralJson: String,
     )
 
     private fun buildProbeScript(spec: AndroidAccountSessionSpec): String {
@@ -1988,6 +1989,7 @@ class AccountWebActivity : AppCompatActivity() {
                                 parsed.quotaText.ifEmpty { null },
                                 parsed.quotaPct,
                                 parsed.quotaDetailJson.ifEmpty { null },
+                                parsed.referralJson.ifEmpty { null },
                             )
                         } else if (parsed.loggedOut) {
                             consecutiveLoggedOut += 1
@@ -2030,6 +2032,7 @@ class AccountWebActivity : AppCompatActivity() {
                 quotaText = obj.optString("quotaText", ""),
                 quotaPct = if (pctRaw in 0..100) pctRaw else null,
                 quotaDetailJson = obj.optString("quotaDetail", ""),
+                referralJson = obj.optString("referral", ""),
             )
         } catch (ignored: Throwable) {
             null
