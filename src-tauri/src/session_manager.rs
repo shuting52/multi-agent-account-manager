@@ -236,26 +236,79 @@ const LOGIN_CAPTURE_INIT_JS: &str = r#"(() => {
       } catch (_) {}
       return window.__maamReferral || null;
     };
+    // 0.2.14：直接读邀请页可见文字。邀请码和剩余次数只在邀请页上出现，
+    // 0.2.13 的 JSON 嗅探认不到：邀请页数据未必走 /api JSON（字段名也未必
+    // 是 referralCode 这类），但码和“还可使用 N 次”一定在页面文字里。
+    // 只在出现邀请文案时才认，避免把聊天里的随机 6 位码当成邀请码。
+    const scanReferralDom = (txt) => {
+      try {
+        const text = typeof txt === 'string' ? txt : ((document.body && document.body.innerText) || '');
+        if (!text || !/邀请好友|邀请码|Invite friends|referral/i.test(text)) return;
+        let rem = null;
+        const mRem = text.match(/还可使用\s*(\d+)\s*次/);
+        if (mRem) rem = parseInt(mRem[1], 10);
+        if (rem === null) {
+          const mEn = text.match(/(\d+)\s*(?:invites?|uses?)\s*(?:remaining|left)/i)
+            || text.match(/(?:remaining|left)\s*[:：]?\s*(\d+)/i);
+          if (mEn) rem = parseInt(mEn[1], 10);
+        }
+        if (rem !== null && (!Number.isFinite(rem) || rem < 0 || rem > 1000)) rem = null;
+        let code = null;
+        const mInline = text.match(/邀请码\s*[:：]?\s*([A-Z0-9]{5,8})/i);
+        if (mInline && /[A-Z]/.test(mInline[1])) code = mInline[1].toUpperCase();
+        if (!code) {
+          const lines = text.split('\n');
+          let anchor = -1;
+          for (let i = 0; i < lines.length; i++) {
+            if (/还可使用|邀请好友|邀请码/.test(lines[i])) { anchor = i; break; }
+          }
+          if (anchor >= 0) {
+            for (let i = Math.max(0, anchor - 8); i < Math.min(lines.length, anchor + 9); i++) {
+              const t = (lines[i] || '').trim();
+              if (/^(?=.*[A-Z])[A-Z0-9]{5,8}$/.test(t)) { code = t.toUpperCase(); break; }
+            }
+          }
+        }
+        if (code) saveReferral(code, rem);
+        else if (rem !== null && window.__maamReferral && window.__maamReferral.code) {
+          saveReferral(window.__maamReferral.code, rem);
+        }
+      } catch (_) {}
+    };
+    // collect 探针是另外一次 eval，IIFE 里的 const 传不过去（0.2.13 直接
+    // 调 referralOut() 会抛 ReferenceError），必须挂 window 上。
+    window.__maamReferralOut = referralOut;
+    window.__maamScanReferralDom = scanReferralDom;
+    if (isPrimaryHost && !window.__maamReferralScanTimer) {
+      window.__maamReferralScanTimer = setInterval(() => { try { scanReferralDom(); } catch (_) {} }, 3000);
+    }
     const recordReferralFromNode = (node) => {
       if (!node || typeof node !== 'object' || Array.isArray(node)) return;
-      const CODE_KEYS = ['referralCode', 'referral_code', 'inviteCode', 'invite_code', 'referralcode', 'invitecode'];
+      const CODE_KEYS = ['referralCode', 'referral_code', 'inviteCode', 'invite_code', 'referralcode', 'invitecode', 'referral', 'invite'];
       let code = null;
       for (const k of CODE_KEYS) {
         if (typeof node[k] === 'string' && /^[A-Z0-9]{4,12}$/i.test(node[k].trim())) { code = node[k]; break; }
       }
       if (!code) return;
-      const REM_KEYS = ['invitesRemaining', 'invites_remaining', 'remainingInvites', 'remaining_invites', 'invitesLeft', 'invites_left', 'referralRemaining', 'referralsRemaining', 'usesRemaining', 'uses_remaining', 'remainingUses', 'remaining_uses'];
+      // 剩余次数可能是字符串数字（"28"），也可能只有已兑现数+上限。
+      const toRemNum = (v) => {
+        if (typeof v === 'number' && Number.isFinite(v)) return Math.floor(v);
+        if (typeof v === 'string' && /^\d{1,4}$/.test(v.trim())) return parseInt(v.trim(), 10);
+        return null;
+      };
+      const REM_KEYS = ['invitesRemaining', 'invites_remaining', 'remainingInvites', 'remaining_invites', 'invitesLeft', 'invites_left', 'referralRemaining', 'referralsRemaining', 'usesRemaining', 'uses_remaining', 'remainingUses', 'remaining_uses', 'remaining'];
       let rem = null;
       for (const k of REM_KEYS) {
-        if (typeof node[k] === 'number' && Number.isFinite(node[k])) { rem = node[k]; break; }
+        const n = toRemNum(node[k]);
+        if (n !== null) { rem = n; break; }
       }
       if (rem === null) {
-        const USED_KEYS = ['invitesUsed', 'invites_used', 'usedInvites', 'used_invites', 'referralsUsed', 'usedCount', 'used_count'];
+        const USED_KEYS = ['invitesUsed', 'invites_used', 'usedInvites', 'used_invites', 'referralsUsed', 'usedCount', 'used_count', 'redeemedCount', 'redeemed_count'];
         const TOTAL_KEYS = ['totalInvites', 'total_invites', 'inviteLimit', 'invite_limit', 'maxInvites', 'max_invites', 'totalCount', 'total_count'];
         let used = null;
         let total = null;
-        for (const k of USED_KEYS) { if (typeof node[k] === 'number' && Number.isFinite(node[k])) { used = node[k]; break; } }
-        for (const k of TOTAL_KEYS) { if (typeof node[k] === 'number' && Number.isFinite(node[k])) { total = node[k]; break; } }
+        for (const k of USED_KEYS) { const n = toRemNum(node[k]); if (n !== null) { used = n; break; } }
+        for (const k of TOTAL_KEYS) { const n = toRemNum(node[k]); if (n !== null) { total = n; break; } }
         if (used !== null && total !== null && total >= used) rem = total - used;
       }
       saveReferral(code, rem);
@@ -856,7 +909,7 @@ const LOGIN_CAPTURE_INIT_JS: &str = r#"(() => {
           recordApiName(nm[1]);
         }
       }
-      if (!/percent_used|percentUsed|quota_status|quotaStatus|usage_row_value_label|usageRowValueLabel|topup_balance|topupBalance|remaining_credits|credit_balance|out_of_credits|UNLIMITED|email|credits|allowance|balance|usage|tokens|billing|subscription|harkTokens|dailyLimit|dailyUsed|poolLimit|poolUsed|dailyResetsAt|poolResetsAt|meters|displayName|display_name/i.test(txt)) return;
+      if (!/percent_used|percentUsed|quota_status|quotaStatus|usage_row_value_label|usageRowValueLabel|topup_balance|topupBalance|remaining_credits|credit_balance|out_of_credits|UNLIMITED|email|credits|allowance|balance|usage|tokens|billing|subscription|harkTokens|dailyLimit|dailyUsed|poolLimit|poolUsed|dailyResetsAt|poolResetsAt|meters|referral|invite|displayName|display_name/i.test(txt)) return;
       try {
         inspectNode(JSON.parse(txt), 0, false);
         return;
@@ -1740,7 +1793,7 @@ const IDENTITY_PROBE_JS: &str = r#"(() => {
       quotaText: quota.text || '',
       quotaPct: quota.pct,
       quotaDetail: quota.detail || null,
-      referral: referralOut(),
+      referral: (() => { try { if (typeof window.__maamScanReferralDom === 'function') window.__maamScanReferralDom(bodyText); } catch (_) {} return (typeof window.__maamReferralOut === 'function' ? window.__maamReferralOut() : null); })(),
       pendingHotkey
     });
   } catch (_) {

@@ -191,6 +191,104 @@ class AccountWebActivity : AppCompatActivity() {
                     : null;
                   setQuota(detail.planValue || detail.planLabel, rem);
                 };
+                // 0.2.14：邀请码读取（与 Rust 侧 LOGIN_CAPTURE_INIT_JS 同款逻辑，
+                // 手机 WebView 跑的是这份 Kotlin 里的脚本，0.2.13 只改了 Rust
+                // 侧所以手机上根本没这段代码）。主路是直接读邀请页可见文字，
+                // JSON 嗅探只做补充。
+                const saveReferral = (code, remaining) => {
+                  if (typeof code !== 'string') return;
+                  const clean = code.trim().toUpperCase();
+                  if (!/^[A-Z0-9]{4,12}$/.test(clean)) return;
+                  const rem = typeof remaining === 'number' && Number.isFinite(remaining) && remaining >= 0 && remaining <= 1000
+                    ? Math.floor(remaining) : null;
+                  const obj = { code: clean, remaining: rem };
+                  window.__maamReferral = obj;
+                  try { localStorage.setItem('__maam_cached_referral__', JSON.stringify(obj)); } catch (_) {}
+                };
+                const referralOut = () => {
+                  try {
+                    if (window.__maamReferral && window.__maamReferral.code) return window.__maamReferral;
+                    const cached = localStorage.getItem('__maam_cached_referral__');
+                    if (cached) {
+                      const d = JSON.parse(cached);
+                      if (d && d.code) { window.__maamReferral = d; return d; }
+                    }
+                  } catch (_) {}
+                  return window.__maamReferral || null;
+                };
+                // 邀请页打开时，码和“还可使用 N 次”都在页面文字里，直接抠。
+                // 只在出现邀请文案时才认，避免把聊天里的随机 6 位码当邀请码。
+                const scanReferralDom = (txt) => {
+                  try {
+                    const text = typeof txt === 'string' ? txt : ((document.body && document.body.innerText) || '');
+                    if (!text || !/邀请好友|邀请码|Invite friends|referral/i.test(text)) return;
+                    let rem = null;
+                    const mRem = text.match(/还可使用\s*(\d+)\s*次/);
+                    if (mRem) rem = parseInt(mRem[1], 10);
+                    if (rem === null) {
+                      const mEn = text.match(/(\d+)\s*(?:invites?|uses?)\s*(?:remaining|left)/i)
+                        || text.match(/(?:remaining|left)\s*[:：]?\s*(\d+)/i);
+                      if (mEn) rem = parseInt(mEn[1], 10);
+                    }
+                    if (rem !== null && (!Number.isFinite(rem) || rem < 0 || rem > 1000)) rem = null;
+                    let code = null;
+                    const mInline = text.match(/邀请码\s*[:：]?\s*([A-Z0-9]{5,8})/i);
+                    if (mInline && /[A-Z]/.test(mInline[1])) code = mInline[1].toUpperCase();
+                    if (!code) {
+                      const lines = text.split('\n');
+                      let anchor = -1;
+                      for (let i = 0; i < lines.length; i++) {
+                        if (/还可使用|邀请好友|邀请码/.test(lines[i])) { anchor = i; break; }
+                      }
+                      if (anchor >= 0) {
+                        for (let i = Math.max(0, anchor - 8); i < Math.min(lines.length, anchor + 9); i++) {
+                          const t = (lines[i] || '').trim();
+                          if (/^(?=.*[A-Z])[A-Z0-9]{5,8}$/.test(t)) { code = t.toUpperCase(); break; }
+                        }
+                      }
+                    }
+                    if (code) saveReferral(code, rem);
+                    else if (rem !== null && window.__maamReferral && window.__maamReferral.code) {
+                      saveReferral(window.__maamReferral.code, rem);
+                    }
+                  } catch (_) {}
+                };
+                const recordReferralFromNode = (node) => {
+                  if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+                  const CODE_KEYS = ['referralCode', 'referral_code', 'inviteCode', 'invite_code', 'referralcode', 'invitecode', 'referral', 'invite'];
+                  let code = null;
+                  for (const k of CODE_KEYS) {
+                    if (typeof node[k] === 'string' && /^[A-Z0-9]{4,12}$/i.test(node[k].trim())) { code = node[k]; break; }
+                  }
+                  if (!code) return;
+                  const toRemNum = (v) => {
+                    if (typeof v === 'number' && Number.isFinite(v)) return Math.floor(v);
+                    if (typeof v === 'string' && /^\d{1,4}$/.test(v.trim())) return parseInt(v.trim(), 10);
+                    return null;
+                  };
+                  const REM_KEYS = ['invitesRemaining', 'invites_remaining', 'remainingInvites', 'remaining_invites', 'invitesLeft', 'invites_left', 'referralRemaining', 'referralsRemaining', 'usesRemaining', 'uses_remaining', 'remainingUses', 'remaining_uses', 'remaining'];
+                  let rem = null;
+                  for (const k of REM_KEYS) {
+                    const n = toRemNum(node[k]);
+                    if (n !== null) { rem = n; break; }
+                  }
+                  if (rem === null) {
+                    const USED_KEYS = ['invitesUsed', 'invites_used', 'usedInvites', 'used_invites', 'referralsUsed', 'usedCount', 'used_count', 'redeemedCount', 'redeemed_count'];
+                    const TOTAL_KEYS = ['totalInvites', 'total_invites', 'inviteLimit', 'invite_limit', 'maxInvites', 'max_invites', 'totalCount', 'total_count'];
+                    let used = null;
+                    let total = null;
+                    for (const k of USED_KEYS) { const n = toRemNum(node[k]); if (n !== null) { used = n; break; } }
+                    for (const k of TOTAL_KEYS) { const n = toRemNum(node[k]); if (n !== null) { total = n; break; } }
+                    if (used !== null && total !== null && total >= used) rem = total - used;
+                  }
+                  saveReferral(code, rem);
+                };
+                // collect 探针是另外一次 eval，IIFE 里的 const 传不过去，必须挂 window 上。
+                window.__maamReferralOut = referralOut;
+                window.__maamScanReferralDom = scanReferralDom;
+                if (isPrimaryHost && !window.__maamReferralScanTimer) {
+                  window.__maamReferralScanTimer = setInterval(() => { try { scanReferralDom(); } catch (_) {} }, 3000);
+                }
                 const formatHarkReset = (iso) => {
                   if (!iso || typeof iso !== 'string') return null;
                   const d = new Date(iso);
@@ -410,6 +508,7 @@ class AccountWebActivity : AppCompatActivity() {
                   if (typeof node.email === 'string' && /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(node.email.trim())) {
                     window.__maamApiEmail = node.email.trim().toLowerCase();
                   }
+                  recordReferralFromNode(node);
                   let nextSkipSub = Boolean(skipSub);
                   if (!nextSkipSub) {
                     const mapped = mapSub(node);
@@ -439,7 +538,7 @@ class AccountWebActivity : AppCompatActivity() {
                 };
                 const inspectText = (txt) => {
                   if (typeof txt !== 'string' || txt.length < 2 || txt.length > 600000) return;
-                  if (!/percent_used|percentUsed|quota_status|quotaStatus|usage_row_value_label|usageRowValueLabel|topup_balance|topupBalance|remaining_credits|credit_balance|out_of_credits|UNLIMITED|email|credits|allowance|balance|usage|tokens|billing|subscription|harkTokens|dailyLimit|dailyUsed|poolLimit|poolUsed|dailyResetsAt|poolResetsAt|meters/i.test(txt)) return;
+                  if (!/percent_used|percentUsed|quota_status|quotaStatus|usage_row_value_label|usageRowValueLabel|topup_balance|topupBalance|remaining_credits|credit_balance|out_of_credits|UNLIMITED|email|credits|allowance|balance|usage|tokens|billing|subscription|harkTokens|dailyLimit|dailyUsed|poolLimit|poolUsed|dailyResetsAt|poolResetsAt|meters|referral|invite/i.test(txt)) return;
                   try {
                     inspectNode(JSON.parse(txt), 0, false);
                     return;
@@ -941,10 +1040,10 @@ class AccountWebActivity : AppCompatActivity() {
                 for (const c of candidates) {
                   const clean = c.toLowerCase();
                   if (!bad.test(clean) && !clean.endsWith('@example.com') && !clean.endsWith('@sentry.io')) {
-                    return JSON.stringify({ auth: true, loggedOut: false, typed, email: clean, avatar: av, quotaText: qText, quotaPct: qPct, quotaDetail: qDetailStr });
+                    return JSON.stringify({ auth: true, loggedOut: false, typed, email: clean, avatar: av, quotaText: qText, quotaPct: qPct, quotaDetail: qDetailStr, referral: (() => { try { if (typeof window.__maamScanReferralDom === 'function') window.__maamScanReferralDom(bodyText); } catch (_) {} return (typeof window.__maamReferralOut === 'function' ? window.__maamReferralOut() : null); })() });
                   }
                 }
-                return JSON.stringify({ auth: true, loggedOut: false, typed, email: '', avatar: av, quotaText: qText, quotaPct: qPct, quotaDetail: qDetailStr });
+                return JSON.stringify({ auth: true, loggedOut: false, typed, email: '', avatar: av, quotaText: qText, quotaPct: qPct, quotaDetail: qDetailStr, referral: (() => { try { if (typeof window.__maamScanReferralDom === 'function') window.__maamScanReferralDom(bodyText); } catch (_) {} return (typeof window.__maamReferralOut === 'function' ? window.__maamReferralOut() : null); })() });
               } catch (_) {
                 return JSON.stringify({ auth: false, loggedOut: false, typed: '', email: '' });
               }
