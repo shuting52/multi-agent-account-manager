@@ -113,24 +113,27 @@ jobs:
           # 后续以提交的清单为准，兜底步骤再强制校验。
           npm run tauri -- android init --ci --skip-targets-install || true
           test -f src-tauri/gen/android/app/src/main/AndroidManifest.xml
-      - name: Ensure extractNativeLibs=true (38MB 重压包可安装)
+      - name: Ensure legacy native-lib packaging (38MB 重压包可安装)
         run: |
           MANIFEST=src-tauri/gen/android/app/src/main/AndroidManifest.xml
-          python3 - "$MANIFEST" <<'EOF'
+          GRADLE=src-tauri/gen/android/app/build.gradle.kts
+          python3 - "$MANIFEST" "$GRADLE" <<'EOF'
           import re, sys
-          p = sys.argv[1]
-          s = open(p).read()
-          if 'android:extractNativeLibs="true"' in s:
-              pass
-          elif 'android:extractNativeLibs="false"' in s:
-              s = s.replace('android:extractNativeLibs="false"', 'android:extractNativeLibs="true"')
+          mp, gp = sys.argv[1], sys.argv[2]
+          s = open(mp).read()
+          s = re.sub(r'\s*android:extractNativeLibs="(true|false)"', '', s)
+          open(mp, "w").write(s)
+          g = open(gp).read()
+          if 'useLegacyPackaging' in g:
+              g = g.replace('useLegacyPackaging = false', 'useLegacyPackaging = true')
           else:
-              s2, n = re.subn(r'(<application\b[^>]*?)>', r'\1 android:extractNativeLibs="true">', s, count=1)
-              assert n == 1, "no <application> tag found"
-              s = s2
-          open(p, "w").write(s)
+              g2, n = re.subn(r'(?m)^(android\s*\{\s*)$', r'\1\n    packagingOptions {\n        jniLibs {\n            useLegacyPackaging = true\n        }\n    }', g, count=1)
+              assert n == 1, "no android block found in build.gradle.kts"
+              g = g2
+          open(gp, "w").write(g)
           EOF
-          grep -q 'android:extractNativeLibs="true"' "$MANIFEST"
+          grep -q 'useLegacyPackaging = true' "$GRADLE"
+          ! grep -q 'android:extractNativeLibs' "$MANIFEST"
       - name: Build test APK
         if: env.APK_VARIANT == 'debug'
         run: |
