@@ -107,7 +107,17 @@ jobs:
         with:
           workspaces: ./src-tauri -> target
       - run: npm ci
-      - run: npm run tauri -- android init --ci --skip-targets-install
+      - name: Init Android project
+        run: |
+          # init 是幂等的；已提交的 gen/android 存在时 init 报错也不中断，
+          # 后续以提交的清单为准，兜底步骤再强制校验。
+          npm run tauri -- android init --ci --skip-targets-install || true
+          test -f src-tauri/gen/android/app/src/main/AndroidManifest.xml
+      - name: Ensure extractNativeLibs=true (38MB 重压包可安装)
+        run: |
+          MANIFEST=src-tauri/gen/android/app/src/main/AndroidManifest.xml
+          sed -i 's/android:extractNativeLibs="false"/android:extractNativeLibs="true"/' "$MANIFEST"
+          grep -q 'android:extractNativeLibs="true"' "$MANIFEST"
       - name: Build test APK
         if: env.APK_VARIANT == 'debug'
         run: |

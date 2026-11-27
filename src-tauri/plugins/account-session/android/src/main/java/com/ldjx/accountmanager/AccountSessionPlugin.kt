@@ -53,6 +53,8 @@ class OpenSessionArgs {
     var switchSeq: Long = 0L
     var viewInstanceId: Long = 0L
     var isColdStart: Boolean = false
+    // 0.2.8：群聊回合后台打开（不抢前台），前台切账号为 false。
+    var background: Boolean = false
 }
 
 @InvokeArg
@@ -191,6 +193,7 @@ class AccountSessionPlugin(private val activity: Activity) : Plugin(activity) {
                 switchSeq = args.switchSeq,
                 viewInstanceId = args.viewInstanceId,
                 isColdStart = args.isColdStart,
+                background = args.background,
             )
 
             val existing = AccountSessionCoordinator.beginSession(spec)
@@ -206,8 +209,25 @@ class AccountSessionPlugin(private val activity: Activity) : Plugin(activity) {
                 }
                 activity.startActivity(intent)
             }
+            // 0.2.8：后台回合不抢前台——成员页起来后，延时把主 Activity 带回前台，
+            // 用户全程留在群聊页看气泡，成员 WebView 在后台继续跑回合。
+            if (args.background) bringMainActivityToFrontDelayed()
             invoke.resolve(JSObject())
         }
+    }
+
+    // 0.2.8：延时把启动器 Activity（主界面）带回前台；REORDER_TO_FRONT 只复用
+    // 已存在的实例，不重建。失败时静默（用户仍可手动按返回回到群聊页）。
+    private fun bringMainActivityToFrontDelayed() {
+        Handler(Looper.getMainLooper()).postDelayed({
+            try {
+                val launchIntent = activity.packageManager
+                    .getLaunchIntentForPackage(activity.packageName)
+                    ?.apply { addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT) }
+                if (launchIntent != null) activity.startActivity(launchIntent)
+            } catch (_: Exception) {
+            }
+        }, 700)
     }
 
     @Command

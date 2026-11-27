@@ -83,6 +83,9 @@ class AccountWebActivity : AppCompatActivity() {
 
     private var currentSpec: AndroidAccountSessionSpec? = null
     private var mainWebView: WebView? = null
+    // 0.2.8：群聊回合后台打开时为 true——onPause 跳过 WebView.onPause()，
+    // 否则 JS 定时器会被暂停，回合的轮询/流式回复就停了。
+    private var keepWebViewAlive: Boolean = false
     private var committedAuthority: String? = null
     private var popupWebView: WebView? = null
     private var mainInputEnabled: Boolean = false
@@ -1000,8 +1003,12 @@ class AccountWebActivity : AppCompatActivity() {
 
     override fun onPause() {
         stopIdentityProbeLoop()
-        mainWebView?.onPause()
-        popupWebView?.onPause()
+        // 0.2.8：后台回合不暂停 WebView，否则成员页的 JS 定时器停掉，
+        // 回合的发送/轮询/流式回复全断；前台页面照旧暂停。
+        if (!keepWebViewAlive) {
+            mainWebView?.onPause()
+            popupWebView?.onPause()
+        }
         super.onPause()
     }
 
@@ -1527,6 +1534,8 @@ class AccountWebActivity : AppCompatActivity() {
         resetCueFailureState()
 
         currentSpec = spec
+        // 0.2.8：后台回合保持 WebView 活跃；前台打开（切账号）时清掉。
+        keepWebViewAlive = spec.background
         activeSessionGeneration.incrementAndGet()
         mainInputEnabled = false
         headerTitleView.text = "正在核验会话…"

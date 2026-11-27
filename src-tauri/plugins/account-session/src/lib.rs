@@ -30,6 +30,10 @@ pub struct OpenMobileAccountPayload {
   pub switch_seq: u64,
   pub view_instance_id: u64,
   pub is_cold_start: bool,
+  // 0.2.8：群聊回合在后台打开成员会话，用户不被拽进成员原生页；
+  // 前台切账号（switch_account）传 false，保持原行为。
+  #[serde(default)]
+  pub background: bool,
 }
 
 #[cfg(mobile)]

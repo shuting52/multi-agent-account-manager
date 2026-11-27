@@ -139,6 +139,13 @@ const PROVIDER_LOGOS: Record<string, ProviderLogoSpec> = {
   muse: { src: "/logos/muse.png", fullBleed: true },
   hark: { src: "/logos/hark.svg", fullBleed: false, monoDark: true },
   cue: { src: "/logos/cue.svg", fullBleed: false },
+  chatgpt: { src: "/logos/chatgpt.svg", fullBleed: false },
+  doubao: { src: "/logos/doubao.svg", fullBleed: false },
+  jimeng: { src: "/logos/jimeng.svg", fullBleed: false },
+  claude: { src: "/logos/claude.svg", fullBleed: false },
+  dola: { src: "/logos/dola.svg", fullBleed: false },
+  workbuddy: { src: "/logos/workbuddy.svg", fullBleed: false },
+  wabi: { src: "/logos/wabi.svg", fullBleed: false },
 };
 
 const GROUP_SKILL_PRESETS: Array<Omit<GroupSharedSkill, "id" | "enabled">> = [
@@ -298,6 +305,10 @@ let modal: ModalMode = { kind: "none" };
 let optimisticSwitching: AccountKey | null = null;
 let busy = false;
 let viewMode: "provider" | "groups" = "provider";
+// 0.2.8「更多平台」收纳区开关（默认收起），只影响移动端顶栏。
+let moreProvidersOpen = false;
+// 0.2.8 群聊顶部收纳区：默认收起，只留一行标题 + 展开开关。
+let groupHeaderExpanded = false;
 let lastGroupListScroll = 0;
 let shouldAnimateModal = false;
 let modalOverlayScrollTop = 0;
@@ -1146,7 +1157,8 @@ async function maybeAutoCheckForUpdates(): Promise<void> {
   if (updateState.checking || updateState.installing) return;
   const now = Date.now();
   if (updateState.lastCheckedAt === 0) {
-    if (updateState.lastFailedAt === 0 || now - updateState.lastFailedAt >= 2 * 60 * 1000) {
+    // 从未成功查到过：网络刚恢复（VPN 接上）时要尽快重试，别等 2 分钟。
+    if (updateState.lastFailedAt === 0 || now - updateState.lastFailedAt >= 30 * 1000) {
       await runCheckForUpdates(true);
     }
     return;
@@ -1226,25 +1238,6 @@ async function runDownloadAndInstall(): Promise<void> {
     updateState.error = String(err);
   } finally {
     updateState.installing = false;
-    rerenderPreservingScroll();
-  }
-}
-
-async function runImportLocalApk(): Promise<void> {
-  if (updateState.importingApk || updateState.installing || updateState.checking) return;
-  updateState.importingApk = true;
-  updateState.error = null;
-  updateState.outcomeStatus = null;
-  updateState.outcomeMessage = "正在打开文件选择器，请选择手机上的 APK 文件…";
-  rerenderPreservingScroll();
-  try {
-    const outcome = await invoke<InstallUpdateOutcome>("install_local_apk");
-    updateState.outcomeStatus = outcome.status;
-    updateState.outcomeMessage = outcome.message;
-  } catch (err) {
-    updateState.error = String(err);
-  } finally {
-    updateState.importingApk = false;
     rerenderPreservingScroll();
   }
 }
@@ -1475,7 +1468,7 @@ function renderUpdateModal(): string {
               .join("")}</div>`
           : `<div class="update-notes">包含稳定性改进与问题修复。</div>`;
       if (!res.downloadUrl) {
-        bodyHtml += `<div class="modal-desc">当前发布尚未包含本平台自动安装包，请点击「发布页」手动下载。</div>`;
+        bodyHtml += `<div class="modal-desc">当前发布尚未包含本平台自动安装包，请稍后再试。</div>`;
       }
     } else {
       bodyHtml += `<div class="modal-desc">当前已是最新版本 v${escapeHtml(curVer)}。</div>`;
@@ -1518,6 +1511,8 @@ function renderUpdateModal(): string {
     bodyHtml += `<div class="update-error-box">${escapeHtml(updateState.error)}</div>`;
   }
 
+  // 0.2.8：更新弹窗只留一个主按钮（立即下载并更新 / 重新检查），
+  // 「关闭」「发布页」「导入本地 APK」已全部删除。
   const canInstall = hasUpdate && Boolean(res?.downloadUrl);
   const disablePrimary =
     updateState.checking ||
@@ -1537,19 +1532,6 @@ function renderUpdateModal(): string {
         updateState.checking ? "检查中..." : "重新检查"
       }</sakuga-button>`;
 
-  const pageBtn = res?.releasePageUrl
-    ? `<sakuga-button class="btn-compact" id="update-open-page-btn" variant="secondary" type="button">发布页</sakuga-button>`
-    : "";
-
-  const importApkBtn =
-    snapshot?.platform === "android"
-      ? `<sakuga-button class="btn-compact" id="update-import-apk-btn" variant="secondary" type="button" ${
-          updateState.checking || updateState.installing || updateState.importingApk
-            ? "disabled"
-            : ""
-        }>${updateState.importingApk ? "选择安装包..." : "导入本地 APK"}</sakuga-button>`
-      : "";
-
   return `
     <div class="${modalOverlayClass()}" role="dialog" aria-modal="true">
       <div class="modal-card">
@@ -1562,9 +1544,6 @@ function renderUpdateModal(): string {
           <sakuga-button class="btn-compact" id="update-open-permission-btn" variant="secondary" type="button">去开启安装权限</sakuga-button>
         </div>` : ""}
         <div class="modal-footer">
-          <sakuga-button class="btn-compact" id="modal-cancel-btn" variant="secondary" type="button" ${updateState.installing ? "disabled" : ""}>关闭</sakuga-button>
-          ${pageBtn}
-          ${importApkBtn}
           ${primaryBtn}
         </div>
       </div>
@@ -3088,7 +3067,7 @@ function renderGroupRightStage(state: ManagerSnapshot): string {
       ? `
         <div class="group-empty-chat">
           <div class="group-empty-title">群聊已就绪</div>
-          <div class="group-empty-desc">可在下方切换「并行」「评审流」或「A2A 接力」协作模式；输入 @ 可模糊点名，网页成员将自动绑定独立专属会话。</div>
+          <div class="group-empty-desc">点上方「展开」可切换「并行」「评审流」或「A2A 接力」协作模式；输入 @ 可模糊点名，网页成员将自动绑定独立专属会话。</div>
         </div>
       `
       : activeGroup.messages
@@ -3219,8 +3198,9 @@ function renderGroupRightStage(state: ManagerSnapshot): string {
           })
           .join("");
 
-  return `
-    <main class="group-chat-stage">
+  // 0.2.8：群聊顶部收纳区（默认收起）：标题 + 成员卡片 + 模式/提及行只在展开时渲染。
+  const headerExpandedHtml = groupHeaderExpanded
+    ? `
       <div class="group-chat-header">
         <div class="group-header-main">
           <div class="group-header-title-row">
@@ -3282,8 +3262,6 @@ function renderGroupRightStage(state: ManagerSnapshot): string {
             `}
         </div>
       </div>
-      <div class="group-messages">${msgsHtml}</div>
-      <div class="group-composer">
         <div class="group-workflow-bar">
           <div class="workflow-mode-group">
             <span class="workflow-label">模式</span>
@@ -3354,6 +3332,20 @@ function renderGroupRightStage(state: ManagerSnapshot): string {
             })
             .join("")}
         </div>
+    `
+    : "";
+
+  return `
+    <main class="group-chat-stage">
+      <div class="group-header-toggle-bar">
+        <button id="group-header-toggle-btn" class="group-header-toggle-btn" type="button" aria-expanded="${groupHeaderExpanded}">
+          <span class="group-header-toggle-title">${escapeHtml(activeGroup.name)} \u00b7 ${activeGroup.members.length} 位成员</span>
+          <span class="group-header-toggle-icon">${groupHeaderExpanded ? "\u25b4 收起" : "\u25be 展开"}</span>
+        </button>
+      </div>
+      ${headerExpandedHtml}
+      <div class="group-messages">${msgsHtml}</div>
+      <div class="group-composer">
         <div id="group-target-hint" class="group-composer-hint">${escapeHtml(targetHint)}</div>
         <div class="group-input-wrap">
           <div id="group-mention-menu" class="group-mention-menu" hidden></div>
@@ -3436,7 +3428,22 @@ function render(): void {
               .join("")}
             <option value="groups">群聊</option>
           </sakuga-tabs>
+          <button id="more-providers-btn" class="more-providers-btn" type="button" aria-expanded="${moreProvidersOpen}">更多平台 ${moreProvidersOpen ? "▴" : "▾"}</button>
         </div>
+        ${moreProvidersOpen ? `
+        <div class="more-providers-panel">
+          <div class="more-providers-title">选择平台添加账号</div>
+          ${snapshot.providers
+            .map(
+              (p) => `
+            <button class="more-provider-row" data-more-provider="${escapeHtml(p.id)}" type="button">
+              ${renderProviderLogo(p, "more-provider-logo")}
+              <span class="more-provider-name">${escapeHtml(p.name)}</span>
+              <span class="more-provider-go">+ 新增</span>
+            </button>`
+            )
+            .join("")}
+        </div>` : ""}
         <div class="middle-column" style="width:100%;min-width:0;flex:1;border-right:none;">
           ${isGroupsView ? renderGroupMiddleContent(snapshot, provider) : renderMiddleContent(snapshot, provider)}
         </div>
@@ -3585,6 +3592,28 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
     void switchProvider(nextId as ProviderId);
   });
 
+  // 0.2.8「更多平台」收纳区：点按钮展开选择框，点一行就切到该平台并进新增账号流程。
+  document.querySelector("#more-providers-btn")?.addEventListener("click", () => {
+    moreProvidersOpen = !moreProvidersOpen;
+    render();
+  });
+  document.querySelectorAll<HTMLElement>("[data-more-provider]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const pid = btn.dataset.moreProvider as ProviderId;
+      if (!pid) return;
+      moreProvidersOpen = false;
+      await switchProvider(pid);
+      await setModal({
+        kind: "add",
+        providerId: pid,
+        draft: "",
+        proxyDraft: "",
+        timezoneDraft: "",
+        cookieDraft: "",
+      });
+    });
+  });
+
   const handleOpenCreateGroup = async () => {
     await openCreateGroupModal(state);
   };
@@ -3709,6 +3738,12 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
     if (activeGroup) {
       await openEditGroupModal(activeGroup);
     }
+  });
+
+  // 0.2.8 群聊顶部收纳：点一下展开/收起成员卡片 + 模式/提及行。
+  document.querySelector("#group-header-toggle-btn")?.addEventListener("click", () => {
+    groupHeaderExpanded = !groupHeaderExpanded;
+    render();
   });
 
   document.querySelector("#group-clear-msgs-btn")?.addEventListener("click", async () => {
@@ -4783,21 +4818,6 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
       rerenderPreservingScroll();
       await runDownloadAndInstall();
     }
-  });
-
-  document.querySelector("#update-open-page-btn")?.addEventListener("click", async () => {
-    const pageUrl = updateState.result?.releasePageUrl;
-    if (!pageUrl) return;
-    try {
-      await invoke("open_external_url", { url: pageUrl });
-    } catch (err) {
-      updateState.error = String(err);
-      rerenderPreservingScroll();
-    }
-  });
-
-  document.querySelector("#update-import-apk-btn")?.addEventListener("click", async () => {
-    await runImportLocalApk();
   });
 
   document.querySelectorAll<HTMLElement>("[data-resolve-uuid]").forEach((btn) => {
@@ -6090,12 +6110,13 @@ async function bootstrap(): Promise<void> {
   snapshot = await invoke<ManagerSnapshot>("get_manager_state");
   syncViewModeFromSnapshot(snapshot);
   render();
-  setTimeout(() => {
-    void runCheckForUpdates(true);
-  }, 3000);
+  // 0.2.8：冷启动立刻静默查一次，有新版马上弹更新弹窗，不等 3 秒、不用手动点检查。
+  // 查不到（断网/VPN 未接通）时静默失败，不弹错窗；网络恢复后由下面的
+  // 60 秒轮询 + online/focus/visibilitychange 事件在 30 秒内重试补查。
+  void runCheckForUpdates(true);
   window.setInterval(() => {
     void maybeAutoCheckForUpdates();
-  }, 30 * 60 * 1000);
+  }, 60 * 1000);
   window.addEventListener("focus", () => {
     void maybeAutoCheckForUpdates();
   });

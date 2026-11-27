@@ -7301,7 +7301,7 @@ impl SessionManager {
       };
 
       self
-        .open_mobile_session(app, account_record, next_seq, view_instance_id, is_cold_start)
+        .open_mobile_session(app, account_record, next_seq, view_instance_id, is_cold_start, false)
         .await
     }
   }
@@ -8566,6 +8566,8 @@ impl SessionManager {
     expected_seq: u64,
     view_instance_id: u64,
     is_cold_start: bool,
+    // 0.2.8：true = 群聊回合后台打开成员会话（不抢前台）；false = 前台切账号。
+    background: bool,
   ) -> Result<ManagerSnapshot, String> {
     let caps = match crate::platform::mobile::check_capabilities(app).await {
       Ok(c) => c,
@@ -8631,6 +8633,7 @@ impl SessionManager {
       switch_seq: expected_seq,
       view_instance_id,
       is_cold_start,
+      background,
     };
 
     if let Err(err) = crate::platform::mobile::open_account_session(app, payload).await {
@@ -13599,8 +13602,9 @@ impl SessionManager {
     };
     // open_mobile_session 在插件侧失败时返回 Ok（带提示的快照）而非 Err，
     // 以 active_slot 是否已换成目标会话为准再确认一次。
+    // 0.2.8：群聊回合 background=true，后台打开成员会话，不把用户拽进成员原生页。
     self
-      .open_mobile_session(app, account, switch_seq, view_instance_id, false)
+      .open_mobile_session(app, account, switch_seq, view_instance_id, false, true)
       .await?;
     let open_err = {
       let locked = self.inner.lock().await;

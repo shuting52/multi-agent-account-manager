@@ -19,6 +19,8 @@ data class AndroidAccountSessionSpec(
     val switchSeq: Long,
     val viewInstanceId: Long,
     val isColdStart: Boolean,
+    // 0.2.8：群聊回合后台打开，不抢前台；前台切账号为 false。
+    val background: Boolean = false,
 )
 
 object AccountSessionCoordinator {
