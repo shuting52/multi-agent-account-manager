@@ -2989,6 +2989,30 @@ function renderGroupRightStage(state: ManagerSnapshot): string {
     `;
   }
 
+  // 0.2.11：群窗口排队状态——从最新一轮用户消息往后数它的回复占位，
+  // queued/sending/streaming 任一还在就是派发中。纯前端计算，不改快照结构。
+  const latestUserMsg = [...activeGroup.messages].reverse().find((m) => m.role === "user");
+  const roundReplies = latestUserMsg
+    ? activeGroup.messages.filter(
+        (m) => m.role === "assistant" && m.createdAtMs > latestUserMsg.createdAtMs && (m.hopDepth ?? 0) === 0
+      )
+    : [];
+  const pendingReplies = roundReplies.filter(
+    (m) => m.status === "queued" || m.status === "sending" || m.status === "streaming"
+  );
+  const doneCount = roundReplies.filter((m) => m.status === "done").length;
+  const currentReply =
+    pendingReplies.find((m) => m.status === "sending" || m.status === "streaming") ?? pendingReplies[0];
+  const dispatchStatusHtml =
+    pendingReplies.length > 0 && currentReply
+      ? (() => {
+          const pos = roundReplies.indexOf(currentReply) + 1;
+          const name = resolveGroupMessageSenderName(state, currentReply);
+          const verb = currentReply.status === "queued" ? "正在打开" : "正在发给";
+          return `<div class="group-dispatch-status"><span class="group-dispatch-dot"></span>${escapeHtml(verb)} ${escapeHtml(name)}（第 ${pos}/${roundReplies.length} 位）· 已完成 ${doneCount} 位</div>`;
+        })()
+      : "";
+
   const workflowMode: GroupWorkflowMode = activeGroup.workflowMode ?? "parallel";
   const maxRelayHops = activeGroup.maxRelayHops ?? 2;
   const draftVal = groupDrafts[activeGroup.id] ?? "";
@@ -3362,6 +3386,7 @@ function renderGroupRightStage(state: ManagerSnapshot): string {
       ${headerExpandedHtml}
       ${workflowBarHtml}
       <div class="group-messages">${msgsHtml}</div>
+      ${dispatchStatusHtml}
       <div class="group-composer">
         <div id="group-target-hint" class="group-composer-hint">${escapeHtml(targetHint)}</div>
         ${composerActionsHtml}

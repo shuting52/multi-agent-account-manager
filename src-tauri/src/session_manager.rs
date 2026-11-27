@@ -13673,26 +13673,36 @@ impl SessionManager {
   /// 前台打开后用户会短暂看到成员原生页，下一回合的 hide_foreground_slot
   /// 会先关掉它并把群聊带回前台，与 0.2.7 的行为一致。
   #[cfg(not(desktop))]
+  // 0.2.11：单次后台打开（打开会话 + 等页面提交，各 50 秒超时）。
+  async fn open_mobile_member_session_background_once(
+    &self,
+    app: &AppHandle,
+    member_key: &AccountKey,
+  ) -> Result<(u64, u64, String), String> {
+    let (view_instance_id, switch_seq, uuid) = self
+      .open_mobile_member_session(app, member_key, true)
+      .await?;
+    self
+      .wait_mobile_page_commit(member_key, switch_seq, view_instance_id)
+      .await?;
+    Ok((view_instance_id, switch_seq, uuid))
+  }
+
   async fn open_mobile_member_session_ready(
     self: &Arc<Self>,
     app: &AppHandle,
     member_key: &AccountKey,
   ) -> Result<(u64, u64, String), String> {
-    let background_result = match self
-      .open_mobile_member_session(app, member_key, true)
-      .await
-    {
-      Ok((view_instance_id, switch_seq, uuid)) => {
-        match self
-          .wait_mobile_page_commit(member_key, switch_seq, view_instance_id)
-          .await
-        {
-          Ok(()) => Ok((view_instance_id, switch_seq, uuid)),
-          Err(e) => Err(e),
-        }
-      }
-      Err(e) => Err(e),
-    };
+    // 0.2.11：后台打开失败先在后台再试一次，两次都打不开才回落前台。
+    // 她手机 VPN 只有几 KB/s，单次后台打开经常 50 秒超时；多试一次能少弹前台。
+    let mut background_result = self
+      .open_mobile_member_session_background_once(app, member_key)
+      .await;
+    if background_result.is_err() {
+      background_result = self
+        .open_mobile_member_session_background_once(app, member_key)
+        .await;
+    }
     match background_result {
       Ok(ready) => Ok(ready),
       Err(_background_err) => {
@@ -14015,6 +14025,10 @@ impl SessionManager {
       site_adapters::resolve_adapter_for_host(&app_data_dir, &host)
     };
 
+    // 0.2.11：与桌面端同款 reload 重试——轮询断线（或页面卡在发送中）时，第 0 轮先
+    // reload 页面再发一次；第 1 轮再失败才置 Error。之前移动端没有这段，断一次就报错。
+    let poll_js = build_group_poll_js(&adapter, msg_id);
+    for retry_round in 0..2usize {
     // 发送：与桌面端同款，no_composer 时等一等重试，最多 24 次。
     let send_js = build_group_send_js(&adapter, msg_id, &effective_prompt_text);
     let mut send_res_opt = None;
@@ -14123,12 +14137,11 @@ impl SessionManager {
     }
 
     // 轮询：与桌面端同款，每 450ms 一次、最多 420 次，边收边推到群聊视图。
-    // 移动端没有桌面端的 reload 重试：eval 持续失败或 stalled_retry 直接置 Error。
     // hark 展开卡片是桌面端专属流程，移动端跳过。
-    let poll_js = build_group_poll_js(&adapter, msg_id);
     let mut last_pushed_text = String::new();
     let mut last_pushed_is_transient = false;
     let mut poll_eval_misses = 0usize;
+    let mut trigger_reload_retry = false;
     for _ in 0..420 {
       tokio::time::sleep(std::time::Duration::from_millis(450)).await;
       let res = match Self::eval_mobile_json(app, &uuid, &poll_js).await {
@@ -14140,6 +14153,10 @@ impl SessionManager {
           poll_eval_misses += 1;
           if poll_eval_misses < 6 {
             continue;
+          }
+          if retry_round == 0 && last_pushed_text.is_empty() {
+            trigger_reload_retry = true;
+            break;
           }
           self
             .update_group_message_state(
@@ -14183,6 +14200,10 @@ impl SessionManager {
         .filter(|s| !s.is_empty());
 
       match state {
+        "stalled_retry" if retry_round == 0 => {
+          trigger_reload_retry = true;
+          break;
+        }
         "stalled_retry" => {
           self
             .update_group_message_state(
@@ -14295,6 +14316,37 @@ impl SessionManager {
       }
     }
 
+    if trigger_reload_retry {
+      {
+        let mut locked = self.inner.lock().await;
+        locked
+          .group_context_synced
+          .remove(&(group_id.to_string(), member_key.clone()));
+      }
+      let _ = self
+        .update_group_message_state(
+          app,
+          group_id,
+          msg_id,
+          GroupReplyStatus::Sending,
+          Some(String::new()),
+          Some(None),
+          false,
+        )
+        .await;
+      // 页面已死或正在重载：再 reload 一次，等它落地（readyState complete，最长约 18 秒），
+      // 期间读不到页面状态是正常的，先等着；等不到也不报错，下一轮发送循环自己会判。
+      let _ = Self::eval_mobile_json(app, &uuid, "window.location.reload()").await;
+      for _ in 0..40 {
+        match Self::eval_mobile_page_state(app, &uuid).await {
+          Some((_, true)) => break,
+          _ => tokio::time::sleep(std::time::Duration::from_millis(450)).await,
+        }
+      }
+      tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+      continue;
+    }
+
     if !last_pushed_text.is_empty() && !last_pushed_is_transient {
       let final_text = last_pushed_text;
       self
@@ -14317,6 +14369,8 @@ impl SessionManager {
         .await;
       return Some(final_text);
     }
+    break;
+    } // end retry_round
 
     self
       .update_group_message_state(
