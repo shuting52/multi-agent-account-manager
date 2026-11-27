@@ -13604,7 +13604,10 @@ impl SessionManager {
     background: bool,
   ) -> Result<(u64, u64, String), String> {
     // 复用移动端切账号的流程：发新 switch_seq、分配 view_instance_id、
-    // 关掉当前前台会话，再调 open_mobile_session 打开该成员的独立会话。
+    // 再调 open_mobile_session 打开该成员的独立会话。
+    // 0.2.12：background=true 时不再关掉当前前台会话——上轮成员 Activity
+    // 留在后台，插件侧 beginSession 找到存活 Activity 就 bindSessionSpec
+    // 换成员，不起新 Activity、不闪屏、不跳回群聊。
     // 与 switch_account_internal 的移动端分支不同：不碰 active_group_id 与
     // selected_provider_id（群聊回合不应把界面切出群聊）。
     let switch_seq = self.current_seq.fetch_add(1, Ordering::SeqCst) + 1;
@@ -13627,7 +13630,20 @@ impl SessionManager {
         return Err("该账号当前处于未登录状态，请先前往登录".to_string());
       }
       platform::parse_account_proxy(acc.proxy_url.as_deref().unwrap_or_default())?;
-      self.hide_foreground_slot(app, switch_seq, &mut locked).await;
+      // 0.2.12：background=true 的群聊回合不再每轮关掉成员页。
+      // 上轮成员 Activity 留在后台，下一个成员直接在同一个 Activity 里
+      // bindSessionSpec 换会话（插件侧 beginSession 找到存活 Activity 就
+      // 复用，不 startActivity），成员页全程不露面、不闪屏，也不再触发
+      // 700ms 带回前台的跳转。只清 Rust 侧状态，不调 close_active_session。
+      // background=false（前台回落）保持原样：要让用户看到成员页，必须
+      // 先关旧页再开新页，PageCommitVisible 也只在可见时才触发。
+      if background {
+        locked.pending_external_auth = None;
+        self.active_view_id.store(0, Ordering::SeqCst);
+        locked.active_slot.take();
+      } else {
+        self.hide_foreground_slot(app, switch_seq, &mut locked).await;
+      }
       acc
     };
     // open_mobile_session 在插件侧失败时返回 Ok（带提示的快照）而非 Err，
@@ -13670,8 +13686,9 @@ impl SessionManager {
   /// 先后台打开并等 PageCommitVisible / PageLoadFinished；后台等不到
   /// （WebView 不可见时 onPageCommitVisible 不触发）或打不开，就改前台
   /// 打开再等一次。两次都失败才报「打开成员会话失败」，不直接让回合死掉。
-  /// 前台打开后用户会短暂看到成员原生页，下一回合的 hide_foreground_slot
-  /// 会先关掉它并把群聊带回前台，与 0.2.7 的行为一致。
+  /// 前台打开后用户会短暂看到成员原生页，下一回合把它带回群聊的方式：
+  /// 0.2.12 起后台回合复用同一个成员 Activity（不关不重开），只有前台
+  /// 回落仍是先关旧页再开新页，与 0.2.7 的行为一致。
   #[cfg(not(desktop))]
   // 0.2.11：单次后台打开（打开会话 + 等页面提交，各 50 秒超时）。
   // 注意接收者必须是 &Arc<Self>：open_mobile_member_session 只认 Arc，&self 调不到它。
