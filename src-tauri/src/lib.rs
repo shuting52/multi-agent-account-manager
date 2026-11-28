@@ -649,6 +649,29 @@ async fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
   updater::open_external_url(&app, &url).await
 }
 
+// 0.2.18：没有网页版的平台（Wabi）：手机上拉起对方 App，没装就去应用商店；
+// 桌面端没有安卓包可拉，直接打开商店/官网链接。
+#[tauri::command]
+async fn open_external_app(
+  app: AppHandle,
+  package_name: String,
+  store_url: String,
+  prefer_store: bool,
+) -> Result<String, String> {
+  #[cfg(mobile)]
+  {
+    crate::platform::mobile::open_external_app(&app, &package_name, &store_url, prefer_store).await
+  }
+
+  #[cfg(not(mobile))]
+  {
+    let _ = package_name;
+    let _ = prefer_store;
+    updater::open_external_url(&app, &store_url).await?;
+    Ok("store".to_string())
+  }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let builder = tauri::Builder::default();
@@ -820,6 +843,7 @@ pub fn run() {
       check_install_permission,
       open_install_permission_settings,
       open_external_url,
+      open_external_app,
       export_sync_bundle,
       import_sync_bundle,
       start_lan_sync_share,

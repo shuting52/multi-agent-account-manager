@@ -1479,10 +1479,12 @@ class AccountWebActivity : AppCompatActivity() {
             )
         }
 
+        // 0.2.18：账号页顶栏对接应用主题（Sakuga 紫 #7C3AED），之前是写死的
+        // 灰色 #EDEDED + 系统默认灰按钮，跟其他页面不像同一个 App。
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(Color.parseColor("#EDEDED"))
+            setBackgroundColor(Color.WHITE)
             setPadding(dp(10), dp(6), dp(12), dp(6))
             minimumHeight = dp(52)
             layoutParams = LinearLayout.LayoutParams(
@@ -1495,6 +1497,11 @@ class AccountWebActivity : AppCompatActivity() {
             text = "← 账号"
             textSize = 13f
             isAllCaps = false
+            minWidth = 0
+            minimumWidth = 0
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            setBackgroundColor(Color.TRANSPARENT)
+            setTextColor(Color.parseColor("#7C3AED"))
             setOnClickListener {
                 if (popupWebView != null) {
                     destroyPopupWebView()
@@ -1522,6 +1529,14 @@ class AccountWebActivity : AppCompatActivity() {
             text = "刷新"
             textSize = 13f
             isAllCaps = false
+            minWidth = 0
+            minimumWidth = 0
+            setPadding(dp(14), dp(6), dp(14), dp(6))
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#7C3AED"))
+                cornerRadius = dp(10).toFloat()
+            }
+            setTextColor(Color.WHITE)
             setOnClickListener {
                 val target = popupWebView ?: mainWebView
                 if (target != null) {
@@ -1577,10 +1592,11 @@ class AccountWebActivity : AppCompatActivity() {
             )
         }
 
+        // 0.2.18：弹窗顶栏跟主顶栏同一套主题（之前是 #F2F5FA + 系统默认灰按钮）。
         val popupHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(Color.parseColor("#F2F5FA"))
+            setBackgroundColor(Color.WHITE)
             setPadding(dp(12), dp(6), dp(10), dp(6))
             minimumHeight = dp(48)
             layoutParams = LinearLayout.LayoutParams(
@@ -1606,6 +1622,11 @@ class AccountWebActivity : AppCompatActivity() {
             text = "关闭认证"
             textSize = 12f
             isAllCaps = false
+            minWidth = 0
+            minimumWidth = 0
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            setBackgroundColor(Color.TRANSPARENT)
+            setTextColor(Color.parseColor("#7C3AED"))
             setOnClickListener {
                 destroyPopupWebView()
             }

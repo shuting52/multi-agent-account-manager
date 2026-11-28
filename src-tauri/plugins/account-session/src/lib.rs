@@ -346,6 +346,37 @@ pub async fn open_external_url(app: &AppHandle, url: &str) -> Result<(), String>
     .map_err(|e| e.to_string())
 }
 
+// 0.2.18：没有网页版的平台（Wabi）：拉起对方 App，没装就去应用商店。
+// 返回 "opened"（已拉起 App）或 "store"（已打开商店页）。
+#[cfg(mobile)]
+pub async fn open_external_app(
+  app: &AppHandle,
+  package_name: &str,
+  store_url: &str,
+  prefer_store: bool,
+) -> Result<String, String> {
+  let bridge = app.state::<MobileSessionBridge<tauri::Wry>>();
+  let resp: serde_json::Value = bridge
+    .0
+    .run_mobile_plugin_async(
+      "openExternalApp",
+      serde_json::json!({
+        "packageName": package_name,
+        "storeUrl": store_url,
+        "preferStore": prefer_store,
+      }),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+  Ok(
+    resp
+      .get("result")
+      .and_then(|v| v.as_str())
+      .unwrap_or("store")
+      .to_string(),
+  )
+}
+
 #[cfg(mobile)]
 pub async fn fetch_text(
   app: &AppHandle,

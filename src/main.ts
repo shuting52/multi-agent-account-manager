@@ -1818,6 +1818,24 @@ function renderModal(state: ManagerSnapshot, provider: ProviderInfo): string {
     const title = creating
       ? `新增 ${escapeHtml(provider.shortName)} 账号`
       : "账号设置";
+    // 0.2.18：没有网页版的平台（Wabi）：不走创建账号 + 内嵌 WebView 登录，
+    // 直接给打开 App / 去商店两个入口。对话留在对方 App 里，叠号只做入口。
+    if (creating && provider.loginKind === "app") {
+      return `
+      <div class="${modalOverlayClass()}" role="dialog" aria-modal="true">
+        <div class="modal-card">
+          <div class="modal-title">${title}</div>
+          <div class="modal-hint">${escapeHtml(provider.name)} 没有网页版，不能在应用里嵌网页登录。手机上装了 App 就直接打开，没装就去应用商店装；对话留在 ${escapeHtml(provider.shortName)} App 里进行。</div>
+          ${modal.error ? `<div id="modal-error-box" class="update-error-box" role="alert">${escapeHtml(modal.error)}</div>` : ""}
+          <div class="modal-footer">
+            <sakuga-button class="btn-compact" id="modal-cancel-btn" variant="secondary" type="button">取消</sakuga-button>
+            <sakuga-button class="btn-compact" id="modal-open-store-btn" variant="secondary" type="button">去应用商店安装</sakuga-button>
+            <sakuga-button class="btn-compact" id="modal-open-app-btn" type="button">打开 ${escapeHtml(provider.shortName)} App</sakuga-button>
+          </div>
+        </div>
+      </div>
+    `;
+    }
     const aliasPlaceholder = creating
       ? "备注名称（留空则自动获取登录邮箱）"
       : "备注名称（留空保留原备注）";
@@ -3536,7 +3554,7 @@ function render(): void {
             <button class="more-provider-row" data-more-provider="${escapeHtml(p.id)}" type="button">
               ${renderProviderLogo(p, "more-provider-logo")}
               <span class="more-provider-name">${escapeHtml(p.name)}</span>
-              <span class="more-provider-go">+ 新增</span>
+              <span class="more-provider-go">${p.loginKind === "app" ? "打开 App" : "+ 新增"}</span>
             </button>`
             )
             .join("")}
@@ -5398,6 +5416,35 @@ function bindEvents(state: ManagerSnapshot, provider: ProviderInfo): void {
     if (imported && modal === currentModal) {
       await setModal({ kind: "none" });
     }
+  });
+
+  // 0.2.18：没有网页版的平台（Wabi）：新增弹窗里直接拉起对方 App，没装就去商店。
+  const openExternalApp = async (preferStore: boolean): Promise<void> => {
+    const currentModal = modal;
+    if (currentModal.kind !== "add") return;
+    if (!provider.appPackage || !provider.storeUrl) return;
+    try {
+      const res = await invoke<string>("open_external_app", {
+        packageName: provider.appPackage,
+        storeUrl: isMobilePlatform(state.platform) ? provider.storeUrl : provider.homepageUrl,
+        preferStore,
+      });
+      if (res === "store") {
+        currentModal.error = `手机上没装 ${provider.shortName} App，已为你打开应用商店页面`;
+        render();
+      } else {
+        await setModal({ kind: "none" });
+      }
+    } catch (err) {
+      currentModal.error = String(err);
+      render();
+    }
+  };
+  document.querySelector("#modal-open-app-btn")?.addEventListener("click", () => {
+    void openExternalApp(false);
+  });
+  document.querySelector("#modal-open-store-btn")?.addEventListener("click", () => {
+    void openExternalApp(true);
   });
 
   document.querySelectorAll<HTMLButtonElement>("[data-toggle-group-member]").forEach((btn) => {

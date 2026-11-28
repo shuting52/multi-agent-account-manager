@@ -17,6 +17,12 @@ export interface ProviderInfo {
   homepageUrl: string;
   callbackOrigins: string[];
   verifiedMethods: string[];
+  /** 登录方式：web（内嵌网页登录）或 app（没有网页版，只能打开手机 App，如 Wabi）。 */
+  loginKind: string;
+  /** app 登录时要拉起的安卓包名（仅 loginKind === "app" 时有值）。 */
+  appPackage: string | null;
+  /** app 登录时没装 App 就去的应用商店链接（仅 loginKind === "app" 时有值）。 */
+  storeUrl: string | null;
 }
 
 export interface AppSettings {

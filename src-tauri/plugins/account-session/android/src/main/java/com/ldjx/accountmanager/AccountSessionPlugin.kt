@@ -98,6 +98,14 @@ class OpenExternalUrlArgs {
     var url: String = ""
 }
 
+// 0.2.18：没有网页版的平台（Wabi）：点新增直接拉起对方 App，没装就去应用商店。
+@InvokeArg
+class OpenExternalAppArgs {
+    var packageName: String = ""
+    var storeUrl: String = ""
+    var preferStore: Boolean = false
+}
+
 @InvokeArg
 class FetchTextArgs {
     var url: String = ""
@@ -429,6 +437,43 @@ class AccountSessionPlugin(private val activity: Activity) : Plugin(activity) {
                 invoke.resolve(JSObject())
             } catch (t: Throwable) {
                 invoke.reject(t.message ?: "无法调用系统浏览器打开链接")
+            }
+        }
+    }
+
+    // 0.2.18：没有网页版的平台（Wabi）：点新增直接拉起对方 App，没装就去应用商店。
+    @Command
+    fun openExternalApp(invoke: Invoke) {
+        val args = invoke.parseArgs(OpenExternalAppArgs::class.java)
+        activity.runOnUiThread {
+            try {
+                if (!args.preferStore) {
+                    val launchIntent = activity.packageManager.getLaunchIntentForPackage(args.packageName)
+                    if (launchIntent != null) {
+                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        activity.startActivity(launchIntent)
+                        val ret = JSObject()
+                        ret.put("result", "opened")
+                        invoke.resolve(ret)
+                        return@runOnUiThread
+                    }
+                }
+                val uri = Uri.parse(args.storeUrl)
+                val scheme = uri.scheme?.lowercase() ?: ""
+                if (scheme != "http" && scheme != "https") {
+                    invoke.reject("应用商店链接无效")
+                    return@runOnUiThread
+                }
+                val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                    addCategory(Intent.CATEGORY_BROWSABLE)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                activity.startActivity(intent)
+                val ret = JSObject()
+                ret.put("result", "store")
+                invoke.resolve(ret)
+            } catch (t: Throwable) {
+                invoke.reject(t.message ?: "无法打开外部应用")
             }
         }
     }

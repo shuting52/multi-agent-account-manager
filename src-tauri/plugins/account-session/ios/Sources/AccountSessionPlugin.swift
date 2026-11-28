@@ -72,6 +72,16 @@ private struct OpenExternalUrlArgs: Decodable {
   let url: String
 }
 
+private struct OpenExternalAppArgs: Decodable {
+  let packageName: String
+  let storeUrl: String
+  let preferStore: Bool
+}
+
+private struct OpenExternalAppResult: Encodable {
+  let result: String
+}
+
 private struct FetchTextArgs: Decodable {
   let url: String
   let userAgent: String
@@ -422,6 +432,31 @@ public class AccountSessionPlugin: Plugin {
       }
     } catch {
       invoke.reject("无效的外部链接参数")
+    }
+  }
+
+  // 0.2.18: no-web-login providers (Wabi): iOS can't launch another app by
+  // package name, so always open the store page in Safari.
+  @objc public func openExternalApp(_ invoke: Invoke) {
+    do {
+      let args = try invoke.parseArgs(OpenExternalAppArgs.self)
+      guard let url = URL(string: args.storeUrl),
+            let scheme = url.scheme?.lowercased(),
+            scheme == "http" || scheme == "https" else {
+        invoke.reject("应用商店链接无效")
+        return
+      }
+      DispatchQueue.main.async {
+        UIApplication.shared.open(url, options: [:]) { ok in
+          if ok {
+            invoke.resolve(OpenExternalAppResult(result: "store"))
+          } else {
+            invoke.reject("无法调用 Safari 打开链接")
+          }
+        }
+      }
+    } catch {
+      invoke.reject("无效的外部应用参数")
     }
   }
 
