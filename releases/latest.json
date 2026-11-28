@@ -1,13 +1,1 @@
-{
-  "version": "0.2.17",
-  "notes": "增加：\n- 无\n\n优化：\n- 邀请码剩余 0 次时卡片显示“邀请已满”，不再显示码和剩余次数；满额文案无数字时扫描也认作 0 次\n\n删除：\n- 无",
-  "pubDate": "2026-11-28T03:20:00Z",
-  "platforms": {
-    "android": {
-      "url": "https://raw.githubusercontent.com/shuting52/multi-agent-account-manager/main/releases/account-manager-android-latest.apk",
-      "sha256": "6e764666b1da57208817bb6e6e61dd37842d18bf148296dae48d8287a60322f5",
-      "filename": "account-manager-android-0.2.17.apk",
-      "size": 38936741
-    }
-  }
-}
+{"notes":"增加：\n- 无\n\n优化：\n- 没网页登录的平台改走打开 App：Wabi 没有网页版，点“新增”直接打开手机里装好的 Wabi App，没装就去应用商店；WorkBuddy 入口改到 workbuddy.cn/app（首页只是下载页）；Dola 入口改到 www.dola.com（原来 dola.ai 可能指错同名产品）\n- 账号页顶栏对接 Sakuga 紫主题：顶栏改白底、紫字，刷新按钮紫底白字圆角，弹窗顶栏同一套\n\n删除：\n- 无","platforms":{"android":{"filename":"account-manager-android-0.2.18.apk","sha256":"a324b3e8243cab557c314a830b62077f61cf601287d8968499a4bba69516b33e","size":38899678,"url":"https://raw.githubusercontent.com/shuting52/multi-agent-account-manager/main/releases/account-manager-android-latest.apk"}},"pubDate":"2026-11-28T07:50:00Z","version":"0.2.18"}
