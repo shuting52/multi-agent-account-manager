@@ -231,6 +231,9 @@ class AccountWebActivity : AppCompatActivity() {
                         || text.match(/(?:remaining|left)\s*[:：]?\s*(\d+)/i);
                       if (mEn) rem = parseInt(mEn[1], 10);
                     }
+                    // 0.2.17：满额时邀请页可能不写“还可使用 0 次”，只写“邀请已满”之类的
+                    // 文案；没有数字时也认作 0 次，卡片才能显示“邀请已满”。
+                    if (rem === null && /邀请已满|次数已用完|名额已满|no invites? (?:left|remaining)|invite limit reached/i.test(text)) rem = 0;
                     if (rem !== null && (!Number.isFinite(rem) || rem < 0 || rem > 1000)) rem = null;
                     let code = null;
                     const mInline = text.match(/邀请码\s*[:：]?\s*([A-Z0-9]{5,8})/i);

@@ -1047,6 +1047,10 @@ body,
   color: #166534;
 }
 
+.quota-invite.invite-full {
+  cursor: default;
+}
+
 .quota-bar-track {
   flex: 1;
   min-width: 36px;

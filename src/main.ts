@@ -988,12 +988,18 @@ function renderQuotaDetailPanel(
     const inviteCode = (acc.inviteCode ?? "").trim();
     const inviteRemaining =
       typeof acc.inviteRemaining === "number" ? acc.inviteRemaining : null;
-    const inviteText = inviteCode
-      ? `邀请码 ${inviteCode} · 剩余 ${inviteRemaining ?? "—"} 次`
-      : "邀请码 — · 剩余 —";
+    // 0.2.17：剩余 0 次就是满额，芯片只显示“邀请已满”，不再显示码和剩余次数。
+    const inviteFull = inviteCode !== "" && inviteRemaining === 0;
+    const inviteText = inviteFull
+      ? "邀请已满"
+      : inviteCode
+        ? `邀请码 ${inviteCode} · 剩余 ${inviteRemaining ?? "—"} 次`
+        : "邀请码 — · 剩余 —";
     const inviteCopied =
       copiedInviteUuid !== null && copiedInviteUuid === acc.uuid;
-    const inviteHtml = `<button class="quota-invite ${inviteCopied ? "copied" : ""}" data-invite-copy="${escapeHtml(acc.uuid)}" data-invite-code="${escapeHtml(inviteCode)}" type="button" title="点一下复制邀请码">${escapeHtml(inviteCopied ? "已复制 ✓" : inviteText)}</button>`;
+    const inviteHtml = inviteFull
+      ? `<span class="quota-invite invite-full" title="邀请次数已用完">${escapeHtml(inviteText)}</span>`
+      : `<button class="quota-invite ${inviteCopied ? "copied" : ""}" data-invite-copy="${escapeHtml(acc.uuid)}" data-invite-code="${escapeHtml(inviteCode)}" type="button" title="点一下复制邀请码">${escapeHtml(inviteCopied ? "已复制 ✓" : inviteText)}</button>`;
     return `
         <div class="quota-compact-meta">
           <span class="quota-sub-text" title="${escapeHtml(rawReset)}">${escapeHtml(shortReset)}</span>
