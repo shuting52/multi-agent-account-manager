@@ -1,0 +1,13 @@
+{
+  "version": "0.2.17",
+  "notes": "增加：\n- 无\n\n优化：\n- 邀请码剩余 0 次时卡片显示“邀请已满”，不再显示码和剩余次数；满额文案无数字时扫描也认作 0 次\n\n删除：\n- 无",
+  "pubDate": "2026-11-28T03:20:00Z",
+  "platforms": {
+    "android": {
+      "url": "https://raw.githubusercontent.com/shuting52/multi-agent-account-manager/main/releases/account-manager-android-latest.apk",
+      "sha256": "6e764666b1da57208817bb6e6e61dd37842d18bf148296dae48d8287a60322f5",
+      "filename": "account-manager-android-0.2.17.apk",
+      "size": 38936741
+    }
+  }
+}
