@@ -208,7 +208,6 @@ export interface UpdateCheckResult {
   sha256: string | null;
   filename: string | null;
   size: number | null;
-  releasePageUrl: string;
 }
 
 export interface UpdateProgressEvent {

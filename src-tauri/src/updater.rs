@@ -6,12 +6,10 @@ use tauri::AppHandle;
 use tauri::Emitter;
 use url::Url;
 
+/// 更新清单只走 raw：仓库固定路径 releases/latest.json（每版覆盖写）。
+/// 检查与下载全程不经过 github.com / api.github.com，不跳 Release 页。
 const LATEST_MANIFEST_URL: &str =
-  "https://github.com/shuting52/multi-agent-account-manager/releases/latest/download/latest.json";
-const GITHUB_LATEST_API_URL: &str =
-  "https://api.github.com/repos/shuting52/multi-agent-account-manager/releases/latest";
-const RELEASES_PAGE_URL: &str =
-  "https://github.com/shuting52/multi-agent-account-manager/releases";
+  "https://raw.githubusercontent.com/shuting52/multi-agent-account-manager/main/releases/latest.json";
 
 static UPDATE_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
@@ -47,7 +45,6 @@ pub struct UpdateCheckResult {
   pub sha256: Option<String>,
   pub filename: Option<String>,
   pub size: Option<u64>,
-  pub release_page_url: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -84,8 +81,6 @@ struct LatestManifest {
   #[serde(default)]
   pub_date: Option<String>,
   #[serde(default)]
-  release_page_url: Option<String>,
-  #[serde(default)]
   platforms: HashMap<String, LatestPlatformAsset>,
 }
 
@@ -98,28 +93,6 @@ struct LatestPlatformAsset {
   filename: Option<String>,
   #[serde(default)]
   size: Option<u64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GithubRelease {
-  tag_name: String,
-  #[serde(default)]
-  body: Option<String>,
-  #[serde(default)]
-  published_at: Option<String>,
-  #[serde(default)]
-  html_url: Option<String>,
-  #[serde(default)]
-  assets: Vec<GithubAsset>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GithubAsset {
-  name: String,
-  browser_download_url: String,
-  size: u64,
-  #[serde(default)]
-  digest: Option<String>,
 }
 
 fn clean_version(raw: &str) -> &str {
@@ -224,44 +197,6 @@ fn default_filename_for_platform(version: &str, url: &str) -> String {
   }
 }
 
-fn select_github_asset<'a>(assets: &'a [GithubAsset], platform: &str) -> Option<&'a GithubAsset> {
-  match platform {
-    "macos" => assets
-      .iter()
-      .find(|a| a.name.to_ascii_lowercase().ends_with(".app.tar.gz"))
-      .or_else(|| {
-        assets
-          .iter()
-          .find(|a| a.name.to_ascii_lowercase().ends_with(".dmg"))
-      }),
-    "windows" => assets
-      .iter()
-      .find(|a| a.name.to_ascii_lowercase().ends_with("-setup.exe"))
-      .or_else(|| {
-        assets
-          .iter()
-          .find(|a| a.name.to_ascii_lowercase().ends_with(".exe"))
-      }),
-    "android" => assets
-      .iter()
-      .find(|a| a.name.to_ascii_lowercase().ends_with("-release.apk"))
-      .or_else(|| {
-        assets
-          .iter()
-          .find(|a| a.name.to_ascii_lowercase().ends_with(".apk"))
-      }),
-    "ios" => assets
-      .iter()
-      .find(|a| a.name.to_ascii_lowercase().ends_with("-ios-unsigned.ipa"))
-      .or_else(|| {
-        assets
-          .iter()
-          .find(|a| a.name.to_ascii_lowercase().ends_with(".ipa"))
-      }),
-    _ => None,
-  }
-}
-
 fn extract_sha256_digest(raw: Option<&str>) -> Option<String> {
   let clean = raw?.trim();
   if clean.is_empty() {
@@ -331,84 +266,39 @@ pub async fn check_for_updates(app: &AppHandle) -> Result<UpdateCheckResult, Str
   let platform_key = crate::platform::current_platform_name();
   let user_agent = format!("multi-agent-account-manager/{current_version}");
 
-  if let Ok((200..=299, body)) =
-    fetch_text_with_status(app, LATEST_MANIFEST_URL, &user_agent, Some("application/json")).await
-  {
-    if let Ok(manifest) = serde_json::from_str::<LatestManifest>(&body) {
-      let latest_version = clean_version(&manifest.version).to_string();
-      let asset = manifest.platforms.get(platform_key);
-      let has_update = is_newer_version(&current_version, &latest_version);
-      return Ok(UpdateCheckResult {
-        current_version,
-        latest_version: if latest_version.is_empty() {
-          app.package_info().version.to_string()
-        } else {
-          latest_version
-        },
-        has_update,
-        release_notes: manifest.notes,
-        pub_date: manifest.pub_date,
-        download_url: asset.map(|a| a.url.clone()),
-        sha256: asset.and_then(|a| extract_sha256_digest(a.sha256.as_deref())),
-        filename: asset.and_then(|a| a.filename.clone()),
-        size: asset.and_then(|a| a.size),
-        release_page_url: manifest
-          .release_page_url
-          .unwrap_or_else(|| RELEASES_PAGE_URL.to_string()),
-      });
-    }
-  }
-
+  // 只读 raw 上的清单，没有第二条路：拉不到或解析失败就直接报错，
+  // 不再回退到 GitHub Release / api.github.com。
   let (status, body) = fetch_text_with_status(
     app,
-    GITHUB_LATEST_API_URL,
+    LATEST_MANIFEST_URL,
     &user_agent,
-    Some("application/vnd.github+json"),
+    Some("application/json"),
   )
   .await?;
 
-  if status == 404 {
-    return Ok(UpdateCheckResult {
-      current_version: current_version.clone(),
-      latest_version: current_version,
-      has_update: false,
-      release_notes: "当前仓库尚未发布任何 GitHub Release 版本。".to_string(),
-      pub_date: None,
-      download_url: None,
-      sha256: None,
-      filename: None,
-      size: None,
-      release_page_url: RELEASES_PAGE_URL.to_string(),
-    });
-  }
-
   if !(200..=299).contains(&status) {
-    return Err(format!("检查更新失败（GitHub API HTTP {status}）"));
+    return Err(format!("检查更新失败（更新清单 HTTP {status}）"));
   }
 
-  let release: GithubRelease =
-    serde_json::from_str(&body).map_err(|e| format!("解析更新信息失败: {e}"))?;
-  let latest_version = clean_version(&release.tag_name).to_string();
+  let manifest: LatestManifest =
+    serde_json::from_str(&body).map_err(|e| format!("解析更新清单失败: {e}"))?;
+  let latest_version = clean_version(&manifest.version).to_string();
+  let asset = manifest.platforms.get(platform_key);
   let has_update = is_newer_version(&current_version, &latest_version);
-  let asset = select_github_asset(&release.assets, platform_key);
-
   Ok(UpdateCheckResult {
-    current_version: current_version.clone(),
+    current_version,
     latest_version: if latest_version.is_empty() {
-      current_version
+      app.package_info().version.to_string()
     } else {
       latest_version
     },
     has_update,
-    release_notes: release.body.unwrap_or_default(),
-    pub_date: release.published_at,
-    download_url: asset.map(|a| a.browser_download_url.clone()),
-    sha256: asset.and_then(|a| extract_sha256_digest(a.digest.as_deref())),
-    filename: asset.map(|a| a.name.clone()),
-    size: asset.map(|a| a.size),
-    release_page_url: release
-      .html_url
-      .unwrap_or_else(|| RELEASES_PAGE_URL.to_string()),
+    release_notes: manifest.notes,
+    pub_date: manifest.pub_date,
+    download_url: asset.map(|a| a.url.clone()),
+    sha256: asset.and_then(|a| extract_sha256_digest(a.sha256.as_deref())),
+    filename: asset.and_then(|a| a.filename.clone()),
+    size: asset.and_then(|a| a.size),
   })
 }
 

@@ -1131,9 +1131,9 @@ async function runCheckForUpdates(silent: boolean): Promise<void> {
     updateState.lastCheckedAt = Date.now();
     updateState.lastFailedAt = 0;
     if (res.hasUpdate) {
-      // 有新版才弹更新弹窗。res.releaseNotes 来自 latest.json 当期最新版
-      // （见 src-tauri/src/updater.rs：先读 manifest.notes，读不到才回退
-      // 到 GitHub 最新 Release 的 body），不会再出现旧版说明。
+      // 有新版才弹更新弹窗。res.releaseNotes 来自 raw 清单 releases/latest.json
+      // 当期最新版（0.2.16 起只走 raw，不再回退 GitHub Release），
+      // 不会再出现旧版说明。
       // 手动检查每次都弹；自动静默检查只对未提示过的版本弹一次。
       clearUpdateToast();
       if (
